@@ -49,6 +49,7 @@ def data_loader_function(data_path):
 define the training loop
 '''
 def run_filter(mode):
+    tf.keras.backend.clear_session()
     if mode == True:
         # define batch_sizepython
         batch_size = 64
@@ -63,7 +64,7 @@ def run_filter(mode):
         model = diff_enKF.RNNmodel(batch_size, num_ensemble, dropout_rate)
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
-        epoch = 60
+        epoch = 50
 
         pred_steps = 1
 
@@ -113,11 +114,11 @@ def run_filter(mode):
                           (i, float(loss), float(end-start)))
                     print(state_h[0])
                     print(gt[i][0])
-                    print(out[3][0])
-                    print(out[4][0])
+                    # print(out[3][0])
+                    # print(out[4][0])
                     print('---')
-            if (k+1) % 20 == 0:
-                model.save_weights('./models/ensemble_model_v3.3_weights_'+name[index]+str(k).zfill(3)+'.h5')
+            if (k+1) % 50 == 0:
+                model.save_weights('./models/ensemble_model_v3.4_weights_'+name[index]+str(k).zfill(3)+'.h5')
                 print('model is saved at this epoch')
     else:
         # define batch_size
@@ -133,7 +134,7 @@ def run_filter(mode):
         test_demo = observations[:, 98, :,:]
         test_demo = tf.reshape(test_demo, [observations.shape[0], 1, 1, 2])
         dummy = model(test_demo[0])
-        model.load_weights('./models/ensemble_model_v3.3_weights_'+name[index]+str(59).zfill(3)+'.h5')
+        model.load_weights('./models/ensemble_model_v3.4_weights_'+name[index]+str(49).zfill(3)+'.h5')
         model.summary()
 
         '''
@@ -154,7 +155,7 @@ def run_filter(mode):
         data['state'] = data_save
         data['ensemble'] = emsemble_save
 
-        with open('./output/ensemble_v3.3_norm_'+ name[index] +'_02.pkl', 'wb') as f:
+        with open('./output/ensemble_v3.4_norm_'+ name[index] +'_02.pkl', 'wb') as f:
             pickle.dump(data, f)
 
 

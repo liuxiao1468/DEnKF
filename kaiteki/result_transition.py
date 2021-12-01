@@ -90,23 +90,22 @@ def reformat_train_data(raw_train):
     states_true = tf.reshape(gt, [num_points, seg, 1, 3])
     return states_true, observations
 
-def transition_dataloader(states_true):
+def transition_dataloader(states_true, observations):
     num_points = states_true.shape[0]
 
-    states_true[0:num_points-1, :,:,:]
-    states_true[1:num_points, :,:,:]
+    observations = observations[0:num_points-1, :,:,:]
     input_state = states_true[0:num_points-1, :,:,:]
     states_true = states_true[1:num_points, :,:,:]
-    return input_state, states_true
+    return input_state, states_true, observations
 
 '''
 load data for training
 '''
 raw_train = get_joint_data('MN02')
 states_true, observations = reformat_train_data(raw_train)
-states_true, states_true_add1 = transition_dataloader(states_true)
+states_true, states_true_add1, observations = transition_dataloader(states_true, observations)
 
-test = states_true[:, 40, :,:]
+test = states_true[:, 10, :,:]
 test = tf.reshape(test, [states_true.shape[0], 1, 1, 3])
 test = np.array(test)
 
@@ -133,7 +132,7 @@ ensemble_5 = []
 num_demos = 30
 
 test_demo = []
-with open('bio_transition_v1.4.pkl', 'rb') as f:
+with open('bio_transition_v2.1.pkl', 'rb') as f:
     data = pickle.load(f)
     for i in range (num_demos):
         test_demo.append(data['state'][i])
@@ -174,13 +173,16 @@ pred_m = np.mean(plt_pred, axis = 0)
 '''
 visualize the states
 '''
+show_points = 200
+
 x = list(range(1, gt_state.shape[0]+1))
 plt.figure(figsize=(1, 3))
 plt.subplot(1, 3, 1)
 plt.plot(x, gt_state[:, 0].flatten(), color = '#e06666ff', linewidth=3.0,label = 'ground truth')
-plt.plot(x, pred_m[:, 0].flatten() ,"--", color = '#0070c0ff' ,linewidth=1.2, alpha=0.5, label = 'prediction')
-plt.fill_between(x, pred_m[:, 0] - (pred_m[:,0] - pred_min[:,0]), pred_m[:,0] + (pred_max[:,0] - pred_m[:,0]), color='#4a86e8ff', alpha=0.2)
+plt.plot(x[0:show_points], pred_m[0:show_points, 0].flatten() ,"--", color = '#0070c0ff' ,linewidth=1.2, alpha=0.5, label = 'prediction')
+plt.fill_between(x[0:show_points], pred_m[0:show_points, 0] - (pred_m[0:show_points,0] - pred_min[0:show_points,0]), pred_m[0:show_points,0] + (pred_max[0:show_points,0] - pred_m[0:show_points,0]), color='#4a86e8ff', alpha=0.2)
 # plt.scatter(x, plt_observation[:,0], s = 15, color = '#6aa84fff', lw=0.05, label = 'observation')
+plt.ylim(-0.3, 0.45)
 plt.legend(loc='upper right')
 plt.ylabel('kinematics')
 plt.grid()
@@ -188,12 +190,13 @@ plt.grid()
 # plt.ylabel('y')
 plt.subplot(1, 3, 2)
 plt.plot(x, gt_state[:, 1].flatten(), color = '#e06666ff', linewidth=3.0,label = 'ground truth')
-plt.plot(x, pred_m[:, 1].flatten() ,"--", color = '#0070c0ff' ,linewidth=1.2, alpha=0.5, label = 'prediction')
-plt.fill_between(x, pred_m[:, 1] - (pred_m[:,1] - pred_min[:,1]), pred_m[:,1] + (pred_max[:,1] - pred_m[:,1]), color='#4a86e8ff', alpha=0.2)
+plt.plot(x[0:show_points], pred_m[0:show_points, 1].flatten() ,"--", color = '#0070c0ff' ,linewidth=1.2, alpha=0.5, label = 'prediction')
+plt.fill_between(x[0:show_points], pred_m[0:show_points, 1] - (pred_m[0:show_points,1] - pred_min[0:show_points,1]), pred_m[0:show_points,1] + (pred_max[0:show_points,1] - pred_m[0:show_points,1]), color='#4a86e8ff', alpha=0.2)
 # for i in range (num_demos):
 #     plt.plot(x, plt_pred[i][:, 1].flatten() ,"--", color = '#4a86e8ff' ,linewidth=1.2, alpha=0.5)
 # plt.scatter(x, plt_observation[:,1], s = 15, color = '#6aa84fff', lw=0.05, label = 'observation')
 plt.legend(loc='upper right')
+plt.ylim(-0.5, 0.6)
 plt.ylabel('kinetics')
 plt.grid()
 # plt.xlabel('x')
@@ -201,11 +204,12 @@ plt.grid()
 
 plt.subplot(1, 3, 3)
 plt.plot(x, gt_state[:, 2].flatten(), color = '#e06666ff', linewidth=3.0,label = 'ground truth')
-plt.plot(x, pred_m[:, 2].flatten() ,"--", color = '#0070c0ff' ,linewidth=1.2, alpha=0.5, label = 'prediction')
-plt.fill_between(x, pred_m[:, 2] - (pred_m[:,2] - pred_min[:,2]), pred_m[:,2] + (pred_max[:,2] - pred_m[:,2]), color='#4a86e8ff', alpha=0.2)
+plt.plot(x[0:show_points], pred_m[0:show_points, 2].flatten() ,"--", color = '#0070c0ff' ,linewidth=1.2, alpha=0.5, label = 'prediction')
+plt.fill_between(x[0:show_points], pred_m[0:show_points, 2] - (pred_m[0:show_points,2] - pred_min[0:show_points,2]), pred_m[0:show_points,2] + (pred_max[0:show_points,2] - pred_m[0:show_points,2]), color='#4a86e8ff', alpha=0.2)
 plt.legend(loc='upper right')
 plt.grid()
 plt.ylabel('power')
+plt.ylim(-0.1, 0.3)
 # plt.xlabel('x')
 # plt.ylabel('y')
 

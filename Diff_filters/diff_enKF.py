@@ -518,10 +518,10 @@ class DiffenKF(tf.keras.layers.AbstractRNNCell):
 
         self.jacobian = True
 
-        self.q_diag = np.ones((self.dim_x)).astype(np.float32) * 1
+        self.q_diag = np.ones((self.dim_x)).astype(np.float32) * 0.5
         self.q_diag = self.q_diag.astype(np.float32)
 
-        self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.5
+        self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.3
         self.r_diag = self.r_diag.astype(np.float32)
 
         self.scale = 1
@@ -535,8 +535,8 @@ class DiffenKF(tf.keras.layers.AbstractRNNCell):
         # learned process model
         self.process_model = ProcessModel(self.batch_size, self.num_ensemble, self.dim_x, self.jacobian, self.dropout_rate)
 
-        # learned process noise
-        self.process_noise_model = ProcessNoise(self.batch_size, self.num_ensemble, self.dim_x, self.q_diag)
+        # # learned process noise
+        # self.process_noise_model = ProcessNoise(self.batch_size, self.num_ensemble, self.dim_x, self.q_diag)
 
         # learned observation model
         self.observation_model = ObservationModel(self.batch_size, self.num_ensemble, self.dim_x, self.dim_z, self.jacobian)
@@ -565,7 +565,7 @@ class DiffenKF(tf.keras.layers.AbstractRNNCell):
         """Integer or TensorShape: size of outputs produced by this cell."""
         # estimated state, observations, Q, R
         return ([self.dim_x], [self.num_ensemble * self.dim_x], 
-                [self.dim_z], [self.dim_x], [self.dim_z])
+                [self.dim_z], [self.dim_z])
 
     ###########################################################################
     # convenience functions for ensuring stability
@@ -700,11 +700,11 @@ class DiffenKF(tf.keras.layers.AbstractRNNCell):
         state_pred = self.process_model(state_old, training)
 
 
-        Q, diag_Q = self.process_noise_model(m_state, training, True)
+        # Q, diag_Q = self.process_noise_model(m_state, training, True)
 
 
-        # state_pred = state_pred
-        state_pred = state_pred + Q
+        # # state_pred = state_pred
+        # state_pred = state_pred + Q
 
         '''
         update step
@@ -734,7 +734,7 @@ class DiffenKF(tf.keras.layers.AbstractRNNCell):
         final_H_X = tf.transpose(H_X, perm=[0,2,1])
 
         # get sensor reading
-        z, encoding = self.sensor_model(raw_sensor, training, False)
+        z, encoding = self.sensor_model(raw_sensor, training, True)
 
         # enable each ensemble to have a observation
         z = tf.reshape(z, [self.batch_size, self.dim_z])
@@ -805,11 +805,11 @@ class DiffenKF(tf.keras.layers.AbstractRNNCell):
         # tuple structure of the output
         z = tf.reshape(z, [self.batch_size, -1])
 
-        output = (m_state_new, state_new, z, 
-            tf.reshape(diag_R, [self.batch_size, -1]), 
-            tf.reshape(diag_Q, [self.batch_size, -1]))
         # output = (m_state_new, state_new, z, 
-        #     tf.reshape(diag_R, [self.batch_size, -1]))
+        #     tf.reshape(diag_R, [self.batch_size, -1]), 
+        #     tf.reshape(diag_Q, [self.batch_size, -1]))
+        output = (m_state_new, state_new, z, 
+            tf.reshape(diag_R, [self.batch_size, -1]))
 
         # print('===========')
         # print('output: ',state_hat)

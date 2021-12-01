@@ -95,11 +95,22 @@ def reformat_train_data(raw_train):
     states_true = tf.reshape(gt, [num_points, seg, 1, 3])
     return states_true, observations
 
+def transition_dataloader(states_true, observations):
+    num_points = states_true.shape[0]
+
+    observations = observations[0:num_points-1, :,:,:]
+    input_state = states_true[0:num_points-1, :,:,:]
+    states_true = states_true[1:num_points, :,:,:]
+    return input_state, states_true, observations
+
 '''
 load the data with the correct index of test observation sequence
 '''
 raw_train = get_joint_data('MN02')
 states_true, observations = reformat_train_data(raw_train)
+input_state, states_true, observations = transition_dataloader(states_true, observations)
+
+states_true = states_true[:, 40, :,:]
 test = observations[:, 40, :,:]
 test = tf.reshape(test, [observations.shape[0], 1, 1, 6])
 test = np.array(test)
@@ -123,7 +134,7 @@ ensemble_3 = []
 ensemble_4 = []
 ensemble_5 = []
 
-with open('bio_pred_v1.4.pkl', 'rb') as f:
+with open('bio_pred_v2.0.pkl', 'rb') as f:
     data = pickle.load(f)
     test_demo = data['state']
     ensemble = data['ensemble']
@@ -131,7 +142,7 @@ with open('bio_pred_v1.4.pkl', 'rb') as f:
 test_demo = np.array(test_demo)
 print(test_demo.shape)
 for i in range (len(states_true)):
-	gt_state.append(np.array(states_true[i][ind][0][0:3]*scale ))
+	gt_state.append(np.array(states_true[i][ind][0:3]*scale ))
 
 	# ori_gt.append(np.array(states_true[i][ind][0][2:4]))
 	# ori_pred.append(np.array(test_demo[i][ind][0][2:4] ))
