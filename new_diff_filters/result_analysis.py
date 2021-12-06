@@ -18,30 +18,6 @@ global index
 index = 1
 
 
-# def data_loader_function(data_path):
-#     name = ['constant', 'exp']
-#     num_sensors = 100
-
-#     observations = []
-#     states_true = []
-#     with open(data_path, 'rb') as f:
-#         traj = pickle.load(f)
-#     for i in range (len(traj['xTrue'])):
-#         observation = []
-#         state = []
-#         for j in range (num_sensors):
-#             observe = [traj['sensors'][i][0][j], traj['sensors'][i][1][j]]
-#             observation.append(observe)
-#             xTrue = traj['xTrue'][i]
-#             state.append(xTrue)
-#         observations.append(observation)
-#         states_true.append(state)
-#     observations = np.array(observations)
-#     observations = tf.reshape(observations, [len(traj['xTrue']), num_sensors, 1, 2])
-#     states_true = np.array(states_true)
-#     states_true = tf.reshape(states_true, [len(traj['xTrue']), num_sensors, 1, 4])
-#     return observations, states_true
-
 def data_loader_function(data_path):
     name = ['constant', 'exp']
     num_sensors = 100
@@ -96,20 +72,20 @@ ensemble_3 = []
 ensemble_4 = []
 ensemble_5 = []
 
-with open('./output/ensemble_v3.4_norm_'+ name[index] +'_02.pkl', 'rb') as f:
+with open('./output/v1.1_'+ name[index] +'_.pkl', 'rb') as f:
     data = pickle.load(f)
     test_demo = data['state']
     ensemble = data['ensemble']
+
+
 
 for i in range (len(states_true)):
 	gt_state.append(np.array(states_true[i][ind][0][0:2]*scale ))
 
 	ori_gt.append(np.array(states_true[i][ind][0][2:4]))
-	ori_pred.append(np.array(test_demo[i][ind][0][2:4] ))
+	ori_pred.append(np.array(test_demo[i][ind][2:4]))
+	plt_pred.append(np.array(test_demo[i][ind][0:2] *scale))
 
-
-	plt_pred.append(np.array(test_demo[i][ind][0][0:2] *scale))
-	# print(test_demo[i])
 	plt_observation.append(np.array(test[i][ind][0][0:2]*scale))
 
 	ensemble_1.append(np.array(ensemble[i][1][0:2] *scale))
@@ -142,11 +118,11 @@ fig = plt.figure()
 # fig.suptitle('output')
 plt.plot(gt_state[:, 0].flatten(),gt_state[:, 1].flatten(),color = '#e06666ff', linewidth=3.0,label = 'ground truth')
 
-plt.plot(ensemble_1[:, 0].flatten(),ensemble_1[:, 1].flatten(), '-*',linewidth=0.5, label = 'ensemble_1', alpha=0.3)
-plt.plot(ensemble_2[:, 0].flatten(),ensemble_2[:, 1].flatten(), '-*',linewidth=0.5, label = 'ensemble_2', alpha=0.3)
-plt.plot(ensemble_3[:, 0].flatten(),ensemble_3[:, 1].flatten(), '-*',linewidth=0.5, label = 'ensemble_3', alpha=0.3)
-plt.plot(ensemble_4[:, 0].flatten(),ensemble_4[:, 1].flatten(), '-*',linewidth=0.5, label = 'ensemble_4', alpha=0.3)
-plt.plot(ensemble_5[:, 0].flatten(),ensemble_5[:, 1].flatten(), '-*',linewidth=0.5, label = 'ensemble_5', alpha=0.3)
+# plt.plot(ensemble_1[:, 0].flatten(),ensemble_1[:, 1].flatten(), '-*',linewidth=0.5, label = 'ensemble_1', alpha=0.3)
+# plt.plot(ensemble_2[:, 0].flatten(),ensemble_2[:, 1].flatten(), '-*',linewidth=0.5, label = 'ensemble_2', alpha=0.3)
+# plt.plot(ensemble_3[:, 0].flatten(),ensemble_3[:, 1].flatten(), '-*',linewidth=0.5, label = 'ensemble_3', alpha=0.3)
+# plt.plot(ensemble_4[:, 0].flatten(),ensemble_4[:, 1].flatten(), '-*',linewidth=0.5, label = 'ensemble_4', alpha=0.3)
+# plt.plot(ensemble_5[:, 0].flatten(),ensemble_5[:, 1].flatten(), '-*',linewidth=0.5, label = 'ensemble_5', alpha=0.3)
 
 plt.plot(plt_pred[:, 0].flatten(),plt_pred[:, 1].flatten(), '--', color = '#4a86e8ff' ,linewidth=2, label = 'prediction', alpha=0.8)
 

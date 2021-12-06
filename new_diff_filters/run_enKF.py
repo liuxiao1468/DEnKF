@@ -32,14 +32,15 @@ class enKF:
         self.jacobian = True
         self.q_diag = np.ones((self.dim_x)).astype(np.float32) * 0.5
         self.q_diag = self.q_diag.astype(np.float32)
-        self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.3
+        self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.5
         self.r_diag = self.r_diag.astype(np.float32)
         self.scale = 1
         self.dropout_rate = dropout_rate
+
     '''
     initialize the enFK framework for training
     '''
-    def init_train_framework(self):
+    def init_framework(self):
         '''
         import sub-modules for diff-enKF framework
         '''
@@ -67,6 +68,7 @@ class enKF:
         ensemble_X = tf.stack([X] * (self.num_ensemble * self.batch_size))
         m_X = tf.stack([X] * self.batch_size)
         m_z = tf.stack([z] * self.batch_size)
+        m_z = tf.reshape(m_z, [self.batch_size, 1, 2])
 
         _ = self.process_model(ensemble_X, True)
         _, _ = self.process_noise_model(m_X, True, True)
@@ -74,40 +76,362 @@ class enKF:
         _, encoding = self.sensor_model(m_z, True, True)
         _, _ = self.observation_noise_model(encoding, True, True)
 
-    def train(self):
-        print(self.process_model.summary())
-        print(self.process_noise_model.summary())
-        print(self.observation_noise_model.summary())
-
-# '''
-# the actually training process
-# '''
-# def train_filter(process_model, process_noise_model, observation_model, sensor_model, 
-#     observation_noise_model, state, observation):
-#     '''
-#     process input state and observations
-#     '''
-#     raw_sensor = observation
-#     raw_sensor = tf.reshape(raw_sensor, [self.batch_size, self.dim_z])
-#     state_old, m_state, step = states
-#     state_old = tf.reshape(state_old, [self.batch_size, self.num_ensemble, self.dim_x])
-#     m_state = tf.reshape(m_state, [self.batch_size, self.dim_x])
+        epoch = 20
+        # load each sub-module
+        self.process_model.load_weights('./models/F_'+version+'_'+name[index]+str(epoch-1).zfill(3)+'.h5')
+        self.process_noise_model.load_weights('./models/Q_'+version+'_'+name[index]+str(epoch-1).zfill(3)+'.h5')
+        self.observation_model.load_weights('./models/H_'+version+'_'+name[index]+str(epoch-1).zfill(3)+'.h5')
+        self.sensor_model.load_weights('./models/S_'+version+'_'+name[index]+str(epoch-1).zfill(3)+'.h5')
+        self.observation_noise_model.load_weights('./models/R_'+version+'_'+name[index]+str(epoch-1).zfill(3)+'.h5')
 
 
+    def run_enKF_filter(self, raw_, m_state, state_old):
+        self.utils = enKF_module.utils()
+        '''
+        prediction step
+        '''
+        training = True
+
+        # get prediction and noise of next state
+        state_pred = self.process_model(state_old, training)
+        Q, diag_Q = self.process_noise_model(m_state, training, True)
+
+        state_pred = state_pred + Q
+
+        '''
+        update step
+        '''
+        learn = True
+        H_X = self.observation_model(state_pred, training, learn)
+
+        # get the emsemble mean of the observations
+        m = tf.reduce_mean(H_X, axis = 1)
+        for i in range (self.batch_size):
+            if i == 0:
+                mean = tf.reshape(tf.stack([m[i]] * self.num_ensemble), [self.num_ensemble, self.dim_z])
+            else:
+                tmp = tf.reshape(tf.stack([m[i]] * self.num_ensemble), [self.num_ensemble, self.dim_z])
+                mean = tf.concat([mean, tmp], 0)
+        mean = tf.reshape(mean, [self.batch_size, self.num_ensemble, self.dim_z])
+        H_A = H_X - mean
+        final_H_A = tf.transpose(H_A, perm=[0,2,1])
+        final_H_X = tf.transpose(H_X, perm=[0,2,1])
+
+        # get sensor reading
+        z, encoding = self.sensor_model(raw_, training, True)
+
+        # enable each ensemble to have a observation
+        z = tf.reshape(z, [self.batch_size, self.dim_z])
+        for i in range (self.batch_size):
+            if i == 0:
+                ensemble_z = tf.reshape(tf.stack([z[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_z])
+            else:
+                tmp = tf.reshape(tf.stack([z[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_z])
+                ensemble_z = tf.concat([ensemble_z, tmp], 0)
+        ensemble_z = tf.reshape(ensemble_z, [self.batch_size, self.num_ensemble, self.dim_z])
+
+        # get observation noise
+        R, diag_R = self.observation_noise_model(encoding, training, True)
+        
+
+        # incorporate the measurement with stochastic noise
+        r_mean = np.zeros((self.dim_z))
+        r_mean = tf.convert_to_tensor(r_mean, dtype=tf.float32)
+        r_mean = tf.stack([r_mean] * self.batch_size)
+        nd_r = tfp.distributions.MultivariateNormalDiag(loc=r_mean, scale_diag=diag_R)
+        epsilon = tf.reshape(nd_r.sample(self.num_ensemble), [self.batch_size, self.num_ensemble, self.dim_z])
+
+        # the measurement y
+        y = ensemble_z + epsilon
+        y = tf.transpose(y, perm=[0,2,1])
+
+        # calculated innovation matrix s
+        innovation = (1/(self.num_ensemble -1)) * tf.matmul(final_H_A,  H_A) + R
+
+        # A matrix
+        m_A = tf.reduce_mean(state_pred, axis = 1)
+        for i in range (self.batch_size):
+            if i == 0:
+                mean_A = tf.reshape(tf.stack([m_A[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_x])
+            else:
+                tmp = tf.reshape(tf.stack([m_A[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_x])
+                mean_A = tf.concat([mean_A, tmp], 0)
+        A = state_pred - mean_A
+        A = tf.transpose(A, perm = [0,2,1])
+
+        try:
+            innovation_inv = tf.linalg.inv(innovation)
+        except:
+            innovation = self.utils._make_valid(innovation)
+            innovation_inv = tf.linalg.inv(innovation)
+
+        # calculating Kalman gain
+        K = (1/(self.num_ensemble -1)) * tf.matmul(tf.matmul(A, H_A), innovation_inv)
+
+        # update state of each ensemble
+        y_bar = y - final_H_X
+        state_new = state_pred +  tf.transpose(tf.matmul(K, y_bar), perm=[0,2,1])
+
+        # the ensemble state mean
+        m_state_new = tf.reduce_mean(state_new, axis = 1)
+
+        # print(diag_Q[0])
+        # print(diag_R[0])
+        # print(z[0])
+        # print(m_state[0])
+        # print(m_state_new[0])
+        # print('--------')
+
+        return m_state_new, state_new
+
+    '''
+    the actual training process
+    '''
+    def train(self, states_true, observations):
+        # define training parameter
+        get_loss = enKF_module.getloss()
+        optimizer1 = tf.keras.optimizers.Adam(learning_rate=1e-4)
+        optimizer2 = tf.keras.optimizers.Adam(learning_rate=1e-4)
+        optimizer3 = tf.keras.optimizers.Adam(learning_rate=1e-4)
+        optimizer4 = tf.keras.optimizers.Adam(learning_rate=1e-4)
+        optimizer5 = tf.keras.optimizers.Adam(learning_rate=1e-4)
+        epoch = 20
+
+        for k in range (epoch):
+            '''
+            process input state and observations
+            '''
+            select = random.sample(range(0, 90), self.batch_size)
+            raw_sensor = []
+            gt = []
+            # for idx in select:
+            #     raw_sensor.append(observations[:, idx, :,:])
+            #     gt.append(states_true[:, idx, :,:])
+
+            raw_sensor = observations[:, 98, :,:]
+            raw_sensor = tf.cast(raw_sensor, tf.float32)
+            gt = states_true[:, 98, :,:]
+            gt = tf.cast(gt, tf.float32)
+
+
+            # raw_sensor = tf.convert_to_tensor(raw_sensor, dtype=tf.float32)
+            raw_sensor = tf.reshape(raw_sensor, [observations.shape[0], self.batch_size, 1, 2])
+            # gt = tf.convert_to_tensor(gt, dtype=tf.float32)
+            gt = tf.reshape(gt, [states_true.shape[0], self.batch_size, 5])
+
+            '''
+            start one epoch of training
+            '''
+            print("========================================= working on epoch %d =========================================: " % (k))
+            for i in range(states_true.shape[0]):
+                start = time.time()
+                with tf.GradientTape(persistent=True) as tape:
+                    '''
+                    diff enKF process start 
+                    '''
+                    raw_ = raw_sensor[i]
+                    raw_ = tf.reshape(raw_, [self.batch_size, self.dim_z])
+                    if i == 0:
+                        X = tf.convert_to_tensor(np.array([0,0,0,0,1]), dtype=tf.float32)
+                        m_state = tf.stack([X] * self.batch_size)
+                        state_old = tf.stack([X] * (self.num_ensemble * self.batch_size))
+
+                    '''
+                    run the filter
+                    '''
+                    m_state_new, state_new = self.run_enKF_filter(raw_, m_state, state_old)
+
+                    loss = get_loss._mse(gt[i] - m_state_new)
+                    loss_1 = 0.5* loss
+                    loss_2 = 0.5* loss
+
+                    loss_3 = 0.5* loss
+                    loss_4 = 0.5* loss
+
+                grads1 = tape.gradient(loss_1, self.process_model.trainable_weights)
+                optimizer1.apply_gradients(zip(grads1, self.process_model.trainable_weights))
+
+                grads2 = tape.gradient(loss_3, self.process_noise_model.trainable_weights)
+                optimizer2.apply_gradients(zip(grads2, self.process_noise_model.trainable_weights))
+
+                grads3 = tape.gradient(loss_2, self.observation_model.trainable_weights)
+                optimizer3.apply_gradients(zip(grads3, self.observation_model.trainable_weights))
+
+                grads4 = tape.gradient(loss_1, self.sensor_model.trainable_weights)
+                optimizer4.apply_gradients(zip(grads4, self.sensor_model.trainable_weights))
+
+                grads5 = tape.gradient(loss_4, self.observation_noise_model.trainable_weights)
+                optimizer5.apply_gradients(zip(grads5, self.observation_noise_model.trainable_weights))
+                end = time.time()
+
+                # update the state and ensembles 
+                m_state = m_state_new
+                state_old = state_new
+
+                # Log every 50 batches
+                if i % 100 == 0:
+                    print("Training loss at step %d: %.4f (took %.3f seconds) " %(i, float(loss), float(end-start)))
+                    print(m_state_new[0])
+                    print(gt[i][0])
+                    print('---')
+
+            if (k+1) % epoch == 0:
+                self.process_model.save_weights('./models/F_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
+                self.process_noise_model.save_weights('./models/Q_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
+                self.observation_model.save_weights('./models/H_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
+                self.sensor_model.save_weights('./models/S_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
+                self.observation_noise_model.save_weights('./models/R_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
+                print('model is saved at this epoch')
+
+    '''
+    The actual testing process
+    '''
+    def test(self, observations):
+        get_loss = enKF_module.getloss()
+
+        test_demo = observations[:, 98, :,:]
+        test_demo = tf.reshape(test_demo, [observations.shape[0], 1, 2])
+        test_demo = tf.cast(test_demo, tf.float32)
+
+        gt = states_true[:, 98, :,:]
+        gt = tf.reshape(gt, [states_true.shape[0], 1, 5])
+        gt = tf.cast(gt, tf.float32)
+
+
+        data = {}
+        data_save = []
+        emsemble_save = []
+
+        for t in range (observations.shape[0]):
+            if t == 0:
+                X = tf.convert_to_tensor(np.array([0,0,0,0,1]), dtype=tf.float32)
+                m_state = tf.stack([X] * self.batch_size)
+                state_old = tf.stack([X] * (self.num_ensemble * self.batch_size))
+
+            # run the filter
+            m_state_new, state_new = self.run_enKF_filter(test_demo[t], m_state, state_old)
+
+            loss = get_loss._mse(gt[t] - m_state_new)
+
+            # update states
+            m_state = m_state_new
+            state_old = state_new
+            if t%100 == 0 :
+                print('---')
+                print(loss)
+                print(m_state_new)
+                print(gt[t])
+
+            # save the test data
+            state_out = np.array(m_state_new)
+            ensemble = np.array(tf.reshape(state_new, [self.num_ensemble, 5]))
+            data_save.append(state_out)
+            emsemble_save.append(ensemble)
 
 
 
+        data['state'] = data_save
+        data['ensemble'] = emsemble_save
 
-def main():
-    batch_size = 4
-    num_ensemble = 32
-    dropout_rate = 0.4
-    filter_ = enKF(batch_size, num_ensemble, dropout_rate)
-    filter_.init_train_framework()
-    filter_.train()
+        with open('./output/'+version+'_'+ name[index] +'_.pkl', 'wb') as f:
+            pickle.dump(data, f)
+
+
+def data_loader_function(data_path):
+    name = ['constant', 'exp']
+    num_sensors = 100
+
+    observations = []
+    states_true = []
+
+    s = 1/25.
+    with open(data_path, 'rb') as f:
+        traj = pickle.load(f)
+    for i in range (len(traj['xTrue'])):
+        observation = []
+        state = []
+        for j in range (num_sensors):
+            observe = [traj['sensors'][i][0][j]*s, traj['sensors'][i][1][j]*s]
+            observation.append(observe)
+            angles = traj['xTrue'][i][2]
+            xTrue = [traj['xTrue'][i][0]*s, traj['xTrue'][i][1]*s, np.cos(angles), np.sin(angles), traj['xTrue'][i][3]]
+            state.append(xTrue)
+        observations.append(observation)
+        states_true.append(state)
+    observations = np.array(observations)
+    observations = tf.reshape(observations, [len(traj['xTrue']), num_sensors, 1, 2])
+    states_true = np.array(states_true)
+    states_true = tf.reshape(states_true, [len(traj['xTrue']), num_sensors, 1, 5])
+    return observations, states_true
+
+def transition_data_loader_function(data_path):
+    name = ['constant', 'exp']
+    num_sensors = 100
+
+    observations = []
+    states_true = []
+    states_true_add1 = []
+
+    s = 1/25.
+    with open(data_path, 'rb') as f:
+        traj = pickle.load(f)
+    for i in range (len(traj['xTrue'])-1):
+        observation = []
+        state = []
+        state_add = []
+        for j in range (num_sensors):
+            observe = [(traj['sensors'][i][0][j] +0)*s, traj['sensors'][i][1][j]*s]
+            observation.append(observe)
+            angles = traj['xTrue'][i][2]
+            xTrue = [(traj['xTrue'][i][0] + 0)*s, traj['xTrue'][i][1]*s, np.cos(angles), np.sin(angles), traj['xTrue'][i][3]]
+            angles = traj['xTrue'][i+1][2]
+            xTrue_add = [(traj['xTrue'][i+1][0] + 0)*s, traj['xTrue'][i+1][1]*s, np.cos(angles), np.sin(angles), traj['xTrue'][i+1][3]]
+            state.append(xTrue)
+            state_add.append(xTrue_add)
+
+        observations.append(observation)
+        states_true.append(state)
+        states_true_add1.append(state_add)
+
+    observations = np.array(observations)
+    observations = tf.reshape(observations, [len(traj['xTrue'])-1, num_sensors, 1, 2])
+    states_true = np.array(states_true)
+    states_true = tf.reshape(states_true, [len(traj['xTrue'])-1, num_sensors, 1, 5])
+    states_true_add1 = np.array(states_true_add1)
+    states_true_add1 = tf.reshape(states_true_add1, [len(traj['xTrue'])-1, num_sensors, 1, 5])
+    return observations, states_true, states_true_add1
+
+def main(mode):
+    if mode == True:
+        batch_size = 1
+        num_ensemble = 32
+        dropout_rate = 0.4
+        filter_ = enKF(batch_size, num_ensemble, dropout_rate)
+        filter_.init_framework()
+        filter_.train(states_true, observations)
+        filter_.test(observations)
+    # else:
+    #     batch_size = 1
+    #     num_ensemble = 32
+    #     dropout_rate = 0.4
+    #     filter_ = enKF(batch_size, num_ensemble, dropout_rate)
+    #     filter_.init_framework()
+    #     filter_.test(observations)
+
+
+global name 
+name = ['constant', 'exp']
+global index
+index = 1
+observations, states_true = data_loader_function('./dataset/100_demos_'+name[index]+'.pkl')
+global version
+version = 'v1.3'
 
 if __name__ == "__main__":
-    main()
+    mode = True
+    main(mode)
+    # mode = False
+    # main(mode)
 
 
 
