@@ -72,7 +72,10 @@ ensemble_3 = []
 ensemble_4 = []
 ensemble_5 = []
 
-with open('./output/v1.1_'+ name[index] +'_.pkl', 'rb') as f:
+global version
+version = 'v2.0'
+
+with open('./output/'+version+'_'+ name[index] +'_02.pkl', 'rb') as f:
     data = pickle.load(f)
     test_demo = data['state']
     ensemble = data['ensemble']

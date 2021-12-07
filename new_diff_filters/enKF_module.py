@@ -105,9 +105,9 @@ class ProcessModel(tf.keras.Model):
         fcadd1 = self.process_fc_add1(fc1)
         # fcadd1 = tf.nn.dropout(fcadd1, rate=self.rate)
         fc2 = self.process_fc2(fcadd1)
-        fc2 = tf.nn.dropout(fc2, rate=self.rate)
+        # fc2 = tf.nn.dropout(fc2, rate=self.rate)
         fcadd2 = self.process_fc_add2(fc2)
-        fcadd2 = tf.nn.dropout(fcadd2, rate=self.rate)
+        # fcadd2 = tf.nn.dropout(fcadd2, rate=self.rate)
         update = self.process_fc3(fcadd2)
 
         new_state = last_state + update
@@ -621,20 +621,6 @@ class ensembleKF(tf.keras.Model):
 
         self.utils_ = utils()
 
-    # @property
-    # def state_size(self):
-    #     """size(s) of state(s) used by this cell.
-    #     It can be represented by an Integer, a TensorShape or a tuple of
-    #     Integers or TensorShapes.
-    #     """
-    #     # estimated state, its covariance, and the step number
-    #     return [[self.num_ensemble * self.dim_x], [self.dim_x], [1]]
-
-    # @property
-    # def output_size(self):
-    #     """Integer or TensorShape: size of outputs produced by this cell."""
-    #     # estimated state, observations, Q, R
-    #     return ([self.dim_x], [self.num_ensemble * self.dim_x], [self.dim_x])
 
     def call(self, inputs, states):
 
@@ -657,7 +643,7 @@ class ensembleKF(tf.keras.Model):
         # get prediction and noise of next state
         state_pred = self.process_model(state_old, training)
 
-        Q, diag_Q = self.process_noise_model(m_state, training)
+        Q, diag_Q = self.process_noise_model(m_state, training, True)
 
         state_pred = state_pred + Q
 
@@ -699,7 +685,7 @@ class ensembleKF(tf.keras.Model):
         ensemble_z = tf.reshape(ensemble_z, [self.batch_size, self.num_ensemble, self.dim_z])
 
         # get observation noise
-        R, diag_R = self.observation_noise_model(encoding, training)
+        R, diag_R = self.observation_noise_model(encoding, training, True)
 
         # incorporate the measurement with stochastic noise
         r_mean = np.zeros((self.dim_z))
