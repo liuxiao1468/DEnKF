@@ -19,13 +19,14 @@
 # SOFTWARE.
 
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import math
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
 import random
 import tensorflow as tf
+tf.compat.v1.disable_eager_execution()
 import time
 import pickle
 import pdb

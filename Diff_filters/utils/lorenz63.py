@@ -12,7 +12,7 @@ tmax, n = 100, 10000
 # tmax, n = 100, 1000
 
 
-def lorenz(x, t, sigma, beta, rho):
+def   (x, t, sigma, beta, rho):
     """The Lorenz equations
     """
     u, v, w = x
@@ -26,34 +26,38 @@ def lorenz(x, t, sigma, beta, rho):
 t = np.linspace(0, tmax, n)
 f = odeint(lorenz, (u0, v0, w0), t, args=(sigma, beta, rho))
 x, y, z = f.T
+print(x.shape)
+print(y.shape)
+print(z.shape)
+point = 2000
+print(x[point], y[point], z[point])
+# # Plot the Lorenz attractor using a Matplotlib 3D projection
+# fig = plt.figure()
+# ax = fig.gca(projection='3d')
+#
+# # Make the line multi-coloured by plotting it in segments of length s which
+# # change in colour across the whole time series.
+# s = 10
+# c = np.linspace(0,1,n)
+# for i in range(0,n-s,s):
+#     ax.plot(x[i:i+s+1], y[i:i+s+1], z[i:i+s+1], color=(1,c[i],0), alpha=0.4)
+#
+# # ax.plot(x, y, z, alpha=0.4)
+#
+# # Remove all the axis clutter, leaving just the curve.
+# # ax.set_axis_off()
+#
+# plt.show()
 
-# Plot the Lorenz attractor using a Matplotlib 3D projection
-fig = plt.figure()
-ax = fig.gca(projection='3d')
-
-# Make the line multi-coloured by plotting it in segments of length s which
-# change in colour across the whole time series.
-s = 10
-c = np.linspace(0,1,n)
-for i in range(0,n-s,s):
-    ax.plot(x[i:i+s+1], y[i:i+s+1], z[i:i+s+1], color=(1,c[i],0), alpha=0.4)
-
-# ax.plot(x, y, z, alpha=0.4)
-
-# Remove all the axis clutter, leaving just the curve.
-# ax.set_axis_off()
-
-plt.show()
 
 
 
-
-# Plot the Lorenz attractor using a Matplotlib 3D projection
-fig = plt.figure()
-ax = fig.gca()
-ax.plot(x, y, alpha=0.4)
-
-# Remove all the axis clutter, leaving just the curve.
-# ax.set_axis_off()
-
-plt.show()
+# # Plot the Lorenz attractor using a Matplotlib 3D projection
+# fig = plt.figure()
+# ax = fig.gca()
+# ax.plot(x, y, alpha=0.4)
+#
+# # Remove all the axis clutter, leaving just the curve.
+# # ax.set_axis_off()
+#
+# plt.show()

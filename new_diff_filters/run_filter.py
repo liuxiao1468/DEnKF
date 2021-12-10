@@ -12,6 +12,7 @@ import pdb
 import tensorflow_probability as tfp
 
 import enKF_module
+tf.compat.v1.disable_eager_execution()
 
 '''
 data loader for training the toy example
@@ -82,7 +83,6 @@ def format_state(state, batch_size, num_ensemble):
     return state_input
 
 
-
 '''
 define the training loop
 '''
@@ -102,7 +102,7 @@ def run_filter(mode):
         model = enKF_module.ensembleKF(batch_size, num_ensemble, dropout_rate)
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
-        epoch = 50
+        epoch = 10
 
         '''
         teacher enforcing
@@ -142,10 +142,9 @@ def run_filter(mode):
         print('student enforcing ')
         print('-----------------')
 
-        pred_steps = 100
         raw_sensor, gt_pre_, gt_now_ = load_train_teacher(batch_size, observations, gt_pre, gt_now)
-        for k in range (epoch):
-            print("========================================= working on epoch %d =========================================: " % (k))
+        for pred_steps in range(5, gt_now_.shape[0], 10):
+            print("========================================= working on steps with %d =========================================: " % (pred_steps))
             for i in range(gt_now_.shape[0]-pred_steps):
                 start = time.time()
                 with tf.GradientTape() as tape:
@@ -164,39 +163,38 @@ def run_filter(mode):
                     optimizer.apply_gradients(zip(grads, model.trainable_weights))
                     end = time.time()
                 # Log every 50 batches.
-                if i % 100 == 0:
+                if i % 100 == 0: 
                     print("Training loss at step %d: %.4f (took %.3f seconds) " %
                           (i, float(loss), float(end-start)))
                     print(state_h[0])
                     print(gt_now_[i+pred_steps][0])
                     print('---')
 
-            if (k+1)%epoch == 0:
-                model.save_weights('./models/enkF_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
-                print('model is saved at this epoch')
-                print('--- start testing ---')
-                for j in range(states_true.shape[0]):
-                    if j ==0:
-                        # init state
-                        X = tf.convert_to_tensor(np.array([0,0,1,0,1]), dtype=tf.float32)
-                        m_state = tf.stack([X] * batch_size)
-                        state_old = tf.stack([X] * (num_ensemble * batch_size))
-                        states = (state_old, m_state)
+        model.save_weights('./models/enkF_'+version+'_'+name[index]+str(49).zfill(3)+'.h5')
+        print('model is saved at this epoch')
+        print('--- start testing ---')
+        for j in range(states_true.shape[0]):
+            if j ==0:
+                # init state
+                X = tf.convert_to_tensor(np.array([0,0,1,0,1]), dtype=tf.float32)
+                m_state = tf.stack([X] * batch_size)
+                state_old = tf.stack([X] * (num_ensemble * batch_size))
+                states = (state_old, m_state)
 
-                    out = model(raw_sensor[j], states)
-                    state_h = out[1]
-                    loss = get_loss._mse( gt_now_[j] - state_h)* 0.1
+            out = model(raw_sensor[j], states)
+            state_h = out[1]
+            loss = get_loss._mse( gt_now_[j] - state_h)* 0.1
 
-                    # Log every 50 batches.
-                    if j % 100 == 0:
-                        print("Training loss at step %d: %.4f " %
-                              (j, float(loss)))
-                        print(state_h[0])
-                        print(gt_now_[j][0])
-                        print('---')
+            # Log every 50 batches.
+            if j % 100 == 0:
+                print("Training loss at step %d: %.4f " %
+                      (j, float(loss)))
+                print(state_h[0])
+                print(gt_now_[j][0])
+                print('---')
 
-                    # update state for next iteration
-                    states = out
+            # update state for next iteration
+            states = out
 
     else:
         # define batch_size
@@ -273,8 +271,8 @@ def main():
     training = True
     run_filter(training)
 
-    # training = False
-    # run_filter(training)
+    training = False
+    run_filter(training)
 
 if __name__ == "__main__":
     main()

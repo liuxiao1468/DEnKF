@@ -226,34 +226,6 @@ class ObservationModel(tf.keras.Model):
         return z_pred
 
 
-# class ObservationModel(tf.keras.Model):
-#     '''
-#     Observation matrix H is given, which does not require learning
-#     the jacobians. It requires one's knowledge of the whole system  
-#     z_pred = [batch_size, 1, dim_z]
-#     '''
-#     def __init__(self, batch_size, num_ensemble, dim_x, dim_z, jacobian):
-#         super(ObservationModel, self).__init__()
-#         self.batch_size = batch_size
-#         self.num_ensemble = num_ensemble
-#         self.jacobian = jacobian
-#         self.dim_x = dim_x
-#         self.dim_z = dim_z
-
-#     def call(self, state, training):
-#         state = tf.reshape(state, [self.batch_size* self.num_ensemble, 1, self.dim_x])
-#         H = tf.concat(
-#                 [tf.tile(np.array([[[1, 0, 0, 0]]], dtype=np.float32),
-#                          [self.batch_size* self.num_ensemble, 1, 1]),
-#                  tf.tile(np.array([[[0, 1, 0, 0]]], dtype=np.float32),
-#                          [self.batch_size* self.num_ensemble, 1, 1])], axis=1)
-#         z_pred = tf.matmul(H, tf.transpose(state, perm=[0,2,1]))
-#         Z_pred = tf.transpose(z_pred, perm=[0,2,1])
-#         z_pred = tf.reshape(z_pred, [self.batch_size, self.num_ensemble, 2])
-
-#         return z_pred, H
-
-
 class SensorModel(tf.keras.Model):
     '''
     sensor model is used for modeling H with given states to get observation z
@@ -433,12 +405,20 @@ class ObservationNoise(tf.keras.Model):
             initializer = tf.constant_initializer(constant))
 
         self.observation_noise_fc1 = tf.keras.layers.Dense(
+            units=16,
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='observation_noise_fc1')
+
+        self.observation_noise_fc2 = tf.keras.layers.Dense(
             units=self.dim_z,
             activation=None,
             kernel_initializer=tf.initializers.glorot_normal(),
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
             bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
-            name='observation_noise_fc1')
+            name='observation_noise_fc2')
 
         self.learned_observation_noise_bias = self.add_weight(
             name = 'learned_observation_noise_bias',
@@ -449,6 +429,7 @@ class ObservationNoise(tf.keras.Model):
     def call(self, inputs, training, learn):
         if learn == True:
             diag = self.observation_noise_fc1(inputs)
+            diag = self.observation_noise_fc2(diag)
             diag = tf.square(diag + self.learned_observation_noise_bias)
         else:
             diag = tf.square(self.learned_observation_noise_bias)
@@ -456,7 +437,6 @@ class ObservationNoise(tf.keras.Model):
 
         diag = diag + self.fixed_observation_noise_bias
         R = tf.linalg.diag(diag)
-        # pdb.set_trace()
         R = tf.reshape(R, [self.batch_size, self.dim_z, self.dim_z])
         diag = tf.reshape(diag, [self.batch_size, self.dim_z])
 
@@ -503,70 +483,10 @@ class getloss():
 
         return loss
 
-
-class DiffenKF(tf.keras.layers.AbstractRNNCell):
-    def __init__(self, batch_size, num_ensemble, dropout_rate,**kwargs):
-
-        super(DiffenKF, self).__init__(**kwargs)
-
-        # initialization
-        self.batch_size = batch_size
-        self.num_ensemble = num_ensemble
-        
-        self.dim_x = 5
-        self.dim_z = 2
-
-        self.jacobian = True
-
-        self.q_diag = np.ones((self.dim_x)).astype(np.float32) * 0.5
-        self.q_diag = self.q_diag.astype(np.float32)
-
-        self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.3
-        self.r_diag = self.r_diag.astype(np.float32)
-
+class utils:
+    def __init__(self):
+        super(utils, self).__init__()
         self.scale = 1
-
-        self.dropout_rate = dropout_rate
-
-
-        # predefine all the necessary sub-models
-        # learned sensor model for processing the images
-
-        # learned process model
-        self.process_model = ProcessModel(self.batch_size, self.num_ensemble, self.dim_x, self.jacobian, self.dropout_rate)
-
-        # # learned process noise
-        # self.process_noise_model = ProcessNoise(self.batch_size, self.num_ensemble, self.dim_x, self.q_diag)
-
-        # learned observation model
-        self.observation_model = ObservationModel(self.batch_size, self.num_ensemble, self.dim_x, self.dim_z, self.jacobian)
-
-        # learned observation noise
-        self.observation_noise_model = ObservationNoise(self.batch_size, self.num_ensemble, self.dim_z, self.r_diag, self.jacobian)
-
-        # learned sensor model
-        self.sensor_model = SensorModel(self.batch_size, self.dim_z)
-
-        # # optional: if action is needed
-        # self.add_actions = addAction(self.batch_size, self.dim_x)
-
-
-    @property
-    def state_size(self):
-        """size(s) of state(s) used by this cell.
-        It can be represented by an Integer, a TensorShape or a tuple of
-        Integers or TensorShapes.
-        """
-        # estimated state, its covariance, and the step number
-        return [[self.num_ensemble * self.dim_x], [self.dim_x], [1]]
-
-    @property
-    def output_size(self):
-        """Integer or TensorShape: size of outputs produced by this cell."""
-        # estimated state, observations, Q, R
-        return ([self.dim_x], [self.num_ensemble * self.dim_x], 
-                [self.dim_z], [self.dim_z])
-
     ###########################################################################
     # convenience functions for ensuring stability
 
@@ -671,17 +591,71 @@ class DiffenKF(tf.keras.layers.AbstractRNNCell):
     ###########################################################################
 
 
+class DiffenKF(tf.keras.layers.AbstractRNNCell):
+    def __init__(self, batch_size, num_ensemble, dropout_rate,**kwargs):
+
+        super(DiffenKF, self).__init__(**kwargs)
+
+        # initialization
+        self.batch_size = batch_size
+        self.num_ensemble = num_ensemble
+        
+        self.dim_x = 5
+        self.dim_z = 2
+
+        self.jacobian = True
+
+        self.q_diag = np.ones((self.dim_x)).astype(np.float32) * 0.5
+        self.q_diag = self.q_diag.astype(np.float32)
+
+        self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.3
+        self.r_diag = self.r_diag.astype(np.float32)
+
+        self.scale = 1
+
+        self.dropout_rate = dropout_rate
+
+
+        # predefine all the necessary sub-models
+        # learned sensor model for processing the images
+
+        # learned process model
+        self.process_model = ProcessModel(self.batch_size, self.num_ensemble, self.dim_x, self.jacobian, self.dropout_rate)
+
+        # learned process noise
+        self.process_noise_model = ProcessNoise(self.batch_size, self.num_ensemble, self.dim_x, self.q_diag)
+
+        # learned observation model
+        self.observation_model = ObservationModel(self.batch_size, self.num_ensemble, self.dim_x, self.dim_z, self.jacobian)
+
+        # learned observation noise
+        self.observation_noise_model = ObservationNoise(self.batch_size, self.num_ensemble, self.dim_z, self.r_diag, self.jacobian)
+
+        # learned sensor model
+        self.sensor_model = SensorModel(self.batch_size, self.dim_z)
+
+
+    @property
+    def state_size(self):
+        """size(s) of state(s) used by this cell.
+        It can be represented by an Integer, a TensorShape or a tuple of
+        Integers or TensorShapes.
+        """
+        # estimated state, its covariance, and the step number
+        return [[self.num_ensemble * self.dim_x], [self.dim_x], [1]]
+
+    @property
+    def output_size(self):
+        """Integer or TensorShape: size of outputs produced by this cell."""
+        # estimated state, observations, Q, R
+        return ([self.dim_x], [self.num_ensemble * self.dim_x], 
+                [self.dim_z], [self.dim_z])
+
     def call(self, inputs, states):
-        """
-        inputs: KF input, velocity/angular velocity
-        state: x, y, psi, v
-        mode: training or testing 
-        """
         # decompose inputs and states
         raw_sensor, actions = inputs
 
         raw_sensor = tf.reshape(raw_sensor, [self.batch_size, 1, self.dim_z])
-        # actions = tf.reshape(actions, [self.batch_size, 1, 2])
 
         state_old, m_state, step = states
 
@@ -691,28 +665,21 @@ class DiffenKF(tf.keras.layers.AbstractRNNCell):
 
         training = True
 
+        missing_data = False
+        missing = tf.constant([0., 0.], dtype=tf.float32)
+        if (np.array(raw_sensor[0][0]) == np.array(missing)).any():
+            missing_data = True
+
         '''
         prediction step
-        state_pred: x_{t}
-                 Q: process noise
         '''
         # get prediction and noise of next state
         state_pred = self.process_model(state_old, training)
-
-
-        # Q, diag_Q = self.process_noise_model(m_state, training, True)
-
-
-        # # state_pred = state_pred
-        # state_pred = state_pred + Q
+        Q, diag_Q = self.process_noise_model(m_state, training, True)
+        state_pred = state_pred + Q
 
         '''
         update step
-        state_new: hat_x_{t}
-                H: observation Jacobians
-                S: innovation matrix
-                K: kalman gain
-
         '''
         # get predicted observations
         learn = True
@@ -748,7 +715,6 @@ class DiffenKF(tf.keras.layers.AbstractRNNCell):
         # make sure the ensemble shape matches
         ensemble_z = tf.reshape(ensemble_z, [self.batch_size, self.num_ensemble, self.dim_z])
 
-
         # get observation noise
         R, diag_R = self.observation_noise_model(encoding, training, True)
 
@@ -781,7 +747,7 @@ class DiffenKF(tf.keras.layers.AbstractRNNCell):
         try:
             innovation_inv = tf.linalg.inv(innovation)
         except:
-            innovation = self._make_valid(innovation)
+            innovation = self.utils_._make_valid(innovation)
             innovation_inv = tf.linalg.inv(innovation)
 
 
@@ -791,7 +757,10 @@ class DiffenKF(tf.keras.layers.AbstractRNNCell):
 
         # update state of each ensemble
         y_bar = y - final_H_X
-        state_new = state_pred +  tf.transpose(tf.matmul(K, y_bar), perm=[0,2,1])
+        if missing_data == False:
+            state_new = state_pred +  tf.transpose(tf.matmul(K, y_bar), perm=[0,2,1])
+        else:
+            state_new = state_pred + tf.transpose(tf.matmul(K, y_bar), perm=[0,2,1]) * 0.0
 
         # the ensemble state mean
         m_state_new = tf.reduce_mean(state_new, axis = 1)
@@ -835,7 +804,7 @@ class RNNmodel(tf.keras.Model):
         self.rnn_layer = tf.keras.layers.RNN(self.filter, return_sequences=True,unroll=False)
 
         # define the initial belief of the filter
-        X = np.array([0,0,0,0,1])
+        X = np.array([0,0,1,0,1])
         X = tf.convert_to_tensor(X, dtype=tf.float32)
 
         ensemble_X = tf.stack([X] * (self.num_ensemble * self.batch_size))
