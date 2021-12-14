@@ -13,7 +13,7 @@ docker run --gpus all \
 			-d \
 			--env-file conf.sh \
 			--name $CONTAINER_NAME \
-			-v /data/xiao/diff_filter/Diff_filters:/tf \
+			-v /data/xiao/diff_filter/new_diff_filters:/tf \
 			-v /data/datasets:/datasets \
 			radiusaiinc/diffkalman:$IMAGE_TAG \
 			/bin/bash -c "python3 run_filter.py"

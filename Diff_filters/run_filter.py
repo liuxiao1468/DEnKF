@@ -222,8 +222,9 @@ def run_filter(mode):
 
         test_demo = observations[:, 98, :,:]
         test_demo = tf.reshape(test_demo, [observations.shape[0], 1, 1, 2])
+        test_demo = mask_observation(test_demo, 0.2)
         dummy = model(test_demo[0])
-        model.load_weights('./models/enkF_'+version+'_'+name[index]+str(49).zfill(3)+'.h5')
+        model.load_weights('./models/enkF_'+'v4.0'+'_'+name[index]+str(49).zfill(3)+'.h5')
         model.summary()
 
         '''
@@ -266,8 +267,8 @@ version = 'v4.2'
 
 def main():
 
-    training = True
-    run_filter(training)
+    # training = True
+    # run_filter(training)
 
     training = False
     run_filter(training)
