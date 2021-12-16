@@ -760,7 +760,7 @@ class DiffenKF(tf.keras.layers.AbstractRNNCell):
         if missing_data == False:
             state_new = state_pred +  tf.transpose(tf.matmul(K, y_bar), perm=[0,2,1])
         else:
-            state_new = state_pred + tf.transpose(tf.matmul(K, y_bar), perm=[0,2,1]) * 0.0
+            state_new = state_pred
 
         # the ensemble state mean
         m_state_new = tf.reduce_mean(state_new, axis = 1)
@@ -830,6 +830,9 @@ class RNNmodel(tf.keras.Model):
         real_actions = action
         inputs = (raw_sensor, real_actions)
 
+        # print(self.state_0[0].shape)
+        # print(inputs[0].shape)
+
         # print('-------------------- ',inputs)
 
         outputs = self.rnn_layer(inputs, initial_state=self.state_0)
@@ -840,167 +843,273 @@ class RNNmodel(tf.keras.Model):
     def from_config(cls, config):
         return cls(**config)
 
+'''
+new development with two RNN models
+'''
+class transition(tf.keras.layers.AbstractRNNCell):
+    def __init__(self, batch_size, num_ensemble, dropout_rate,**kwargs):
+
+        super(transition, self).__init__(**kwargs)
+
+        # initialization
+        self.batch_size = batch_size
+        self.num_ensemble = num_ensemble
+        
+        self.dim_x = 5
+
+        self.jacobian = True
+
+        self.q_diag = np.ones((self.dim_x)).astype(np.float32) * 0.3
+        self.q_diag = self.q_diag.astype(np.float32)
+
+        self.dropout_rate = dropout_rate
+
+        # learned process model
+        self.process_model = ProcessModel(self.batch_size, self.num_ensemble, self.dim_x, self.jacobian, self.dropout_rate)
+
+        # learned process noise
+        self.process_noise_model = ProcessNoise(self.batch_size, self.num_ensemble, self.dim_x, self.q_diag)
+
+    @property
+    def state_size(self):
+        """size(s) of state(s) used by this cell.
+        It can be represented by an Integer, a TensorShape or a tuple of
+        Integers or TensorShapes.
+        """
+        # estimated state, its covariance, and the step number
+        return [[self.num_ensemble * self.dim_x], [self.dim_x]]
+
+    @property
+    def output_size(self):
+        """Integer or TensorShape: size of outputs produced by this cell."""
+        # estimated state, observations, Q, R
+        return ([self.num_ensemble * self.dim_x], [self.dim_x])
+
+    def call(self, input_states, state_hat):
+
+        state_old, m_state = input_states
+
+        state_old = tf.reshape(state_old, [self.batch_size, self.num_ensemble, self.dim_x])
+
+        m_state = tf.reshape(m_state, [self.batch_size, self.dim_x])
+
+        # get prediction and noise of next state
+        training = True
+        state_pred = self.process_model(state_old, training)
+
+        Q, diag_Q = self.process_noise_model(m_state, training, True)
+        state_pred = state_pred + Q
+
+        # the ensemble state mean
+        m_state = tf.reduce_mean(state_pred, axis = 1)
+
+        state_pred = tf.reshape(state_pred, [self.batch_size, -1])
+
+        state_hat = (state_pred, m_state)
+
+        ensemble = tf.reshape(state_pred, [self.batch_size, 1, self.num_ensemble* self.dim_x])
+
+        m_state = tf.reshape(m_state, [self.batch_size, 1, self.dim_x])
+
+        # tuple structure of updated state
+        output = (ensemble, m_state)
+
+        return output, state_hat
 
 
-# '''
-# data loader for training the toy example
-# observation = [timestep, batch_size, 1, dim_z] -> input data
-# states_true = [timestep, batch_size, 1, dim_x] -> ground truth
-# '''
-# def data_loader_function(data_path):
-#     name = ['constant', 'exp']
-#     num_sensors = 100
+class TransitionRNN(tf.keras.Model):
+    def __init__(self, batch_size, num_ensemble, dropout_rate, hetero_q=False, hetero_r=True, **kwargs):
 
-#     observations = []
-#     states_true = []
+        super(TransitionRNN, self).__init__(**kwargs)
 
-#     s = 1/25.
-#     with open(data_path, 'rb') as f:
-#         traj = pickle.load(f)
-#     for i in range (len(traj['xTrue'])):
-#         observation = []
-#         state = []
-#         for j in range (num_sensors):
-#             observe = [traj['sensors'][i][0][j]*s, traj['sensors'][i][1][j]*s]
-#             observation.append(observe)
-#             angles = traj['xTrue'][i][2]
-#             xTrue = [traj['xTrue'][i][0]*s, traj['xTrue'][i][1]*s, np.cos(angles), np.sin(angles), traj['xTrue'][i][3]]
-#             state.append(xTrue)
-#         observations.append(observation)
-#         states_true.append(state)
-#     observations = np.array(observations)
-#     observations = tf.reshape(observations, [len(traj['xTrue']), num_sensors, 1, 2])
-#     states_true = np.array(states_true)
-#     states_true = tf.reshape(states_true, [len(traj['xTrue']), num_sensors, 1, 5])
-#     return observations, states_true
+        self.batch_size = batch_size
 
-# '''
-# define the training loop
-# '''
-# def run_filter(mode):
-#     if mode == True:
-#         # define batch_sizepython
-#         batch_size = 64
+        self.num_ensemble = num_ensemble
 
-#         # define number of ensemble
-#         num_ensemble = 32
+        self.dropout_rate = dropout_rate
 
-#         # define dropout rate
-#         dropout_rate = 0.4
+        # instantiate the filter
+        self.filter = transition(batch_size, num_ensemble, dropout_rate)
 
-#         # load the model
-#         model = RNNmodel(batch_size, num_ensemble, dropout_rate)
+        # wrap the filter in a RNN layer
+        self.rnn_layer = tf.keras.layers.RNN(self.filter, return_sequences=True,unroll=False)
 
-#         optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
-#         epoch = 100
+        # define the initial belief of the filter
+        X = np.array([0,0,1,0,1])
+        X = tf.convert_to_tensor(X, dtype=tf.float32)
 
-#         for k in range (epoch):
-#             '''
-#             data preprocessing steps
-#             '''
-#             select = random.sample(range(0, 90), batch_size)
-#             raw_sensor = []
-#             gt = []
-#             for idx in select:
-#                 raw_sensor.append(observations[:, idx, :,:])
-#                 gt.append(states_true[:, idx, :,:])
-#             raw_sensor = tf.convert_to_tensor(raw_sensor, dtype=tf.float32)
-#             raw_sensor = tf.reshape(raw_sensor, [observations.shape[0], batch_size, 1, 2])
-#             gt = tf.convert_to_tensor(gt, dtype=tf.float32)
-#             gt = tf.reshape(gt, [states_true.shape[0], batch_size, 1, 5])
+        ensemble_X = tf.stack([X] * (self.num_ensemble * self.batch_size))
+        m_X = tf.stack([X] * self.batch_size)
 
-#             print("========================================= working on epoch %d =========================================: " % (k))
+        ensemble_X = tf.reshape(ensemble_X, [batch_size, -1])
+        m_X = tf.reshape(m_X, [batch_size, -1])
 
-#             for i in range(states_true.shape[0]):
+        self.state_0 = (ensemble_X, m_X)
 
-#                 start = time.time()
+    def call(self, input_states):
 
-#                 with tf.GradientTape() as tape:
-#                     out = model(raw_sensor[i])
-#                     state_h = out[0]
-#                     loss = get_loss._mse( gt[i] - state_h)
+        ensemble = input_states[0]
 
-#                 # grads = tape.gradient(loss, model.variables)
-#                 # optimizer.apply_gradients(grads_and_vars=zip(grads, model.variables))
-#                 grads = tape.gradient(loss, model.trainable_weights)
-#                 optimizer.apply_gradients(zip(grads, model.trainable_weights))
-#                 end = time.time()
-#                 # print(model.summary())
-                
+        ensemble = tf.reshape(ensemble, [self.batch_size, -1])
+        ensemble = tf.reshape(ensemble, [self.batch_size, 1, self.num_ensemble*5])
+        m_state = tf.reshape(input_states[1], [self.batch_size, -1])
+        m_state = tf.reshape(m_state, [self.batch_size, 1, 5])
 
-#                 # Log every 50 batches.
-#                 if i % 100 == 0:
-#                     print("Training loss at step %d: %.4f (took %.3f seconds) " %
-#                           (i, float(loss), float(end-start)))
-#                     print(state_h[0])
-#                     print(gt[i][0])
-#                     print(out[4][0])
-#                     print('---')
-#             if (k+1) % 20 == 0:
-#                 model.save_weights('./models/ensemble_model_v2.7_weights_'+name[index]+str(k).zfill(3)+'.h5')
-#                 print('model is saved at this epoch')
-#     else:
-#         # define batch_size
-#         batch_size = 1
+        input_states = (ensemble, m_state)
+        # print(self.state_0[0].shape)
+        # print(self.state_0[1].shape)
 
-#         num_ensemble = 32
+        # print('---------')
+        # print(ensemble.shape)
+        # print(m_state.shape)
 
-#         dropout_rate = 0.4
+        outputs = self.rnn_layer(input_states, initial_state=self.state_0)
+        
+        return outputs
 
-#         # load the model
-#         model = RNNmodel(batch_size, num_ensemble, dropout_rate)
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
 
-#         test_demo = observations[:, 98, :,:]
-#         test_demo = tf.reshape(test_demo, [observations.shape[0], 1, 1, 2])
-#         dummy = model(test_demo[0])
-#         model.load_weights('./models/ensemble_model_v2.7_weights_'+name[index]+str(59).zfill(3)+'.h5')
-#         model.summary()
+class enKFUpdate(tf.keras.Model):
+    def __init__(self, batch_size, num_ensemble, dropout_rate,**kwargs):
+        super(enKFUpdate, self).__init__()
 
-#         '''
-#         run a test demo and save the state of the test demo
-#         '''
-#         data = {}
-#         data_save = []
-#         emsemble_save = []
+        # initialization
+        self.batch_size = batch_size
+        self.num_ensemble = num_ensemble
+        
+        self.dim_x = 5
+        self.dim_z = 2
 
-#         for t in range (states_true.shape[0]):
-#             out = model(test_demo[t])
-#             state_out = np.array(out[0])
-#             ensemble = np.array(tf.reshape(out[1], [num_ensemble, 5]))
-#             # print('----------')
-#             # print(ensemble)
-#             data_save.append(state_out)
-#             emsemble_save.append(ensemble)
-#         data['state'] = data_save
-#         data['ensemble'] = emsemble_save
+        self.jacobian = True
 
-#         with open('./output/ensemble_v2.7_norm_'+ name[index] +'_02.pkl', 'wb') as f:
-#             pickle.dump(data, f)
+        self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.3
+        self.r_diag = self.r_diag.astype(np.float32)
 
+        self.dropout_rate = dropout_rate
 
-# '''
-# load loss functions
-# '''
-# get_loss = getloss()
+        # learned observation model
+        self.observation_model = ObservationModel(self.batch_size, self.num_ensemble, self.dim_x, self.dim_z, self.jacobian)
 
-# '''
-# load data for training
-# '''
-# global name 
-# name = ['constant', 'exp']
-# global index
-# index = 1
-# observations, states_true = data_loader_function('./dataset/100_demos_'+name[index]+'.pkl')
-# global count
-# count = 0
+        # learned observation noise
+        self.observation_noise_model = ObservationNoise(self.batch_size, self.num_ensemble, self.dim_z, self.r_diag, self.jacobian)
 
-# def main():
+        # learned sensor model
+        self.sensor_model = SensorModel(self.batch_size, self.dim_z)
 
-#     training = True
-#     run_filter(training)
+        self.utils_ = utils()
 
-#     training = False
-#     run_filter(training)
+    def call(self, inputs, states):
 
-# if __name__ == "__main__":
-#     main()
+        # decompose inputs and states
+        raw_sensor = inputs
+
+        raw_sensor = tf.reshape(raw_sensor, [self.batch_size, 1, self.dim_z])
+
+        state_old, m_state = states
+
+        state_old = tf.reshape(state_old, [self.batch_size, self.num_ensemble, self.dim_x])
+
+        m_state = tf.reshape(m_state, [self.batch_size, self.dim_x])
+
+        training = True
+
+        '''
+        prediction step
+        '''
+        # get prediction and noise of next state
+        state_pred = state_old
+
+        # Q, diag_Q = self.process_noise_model(m_state, training, True)
+
+        # state_pred = state_pred + Q
+
+        '''
+        update step
+        '''
+        # get predicted observations
+        learn = True
+        H_X = self.observation_model(state_pred, training, learn)
+
+        # get the emsemble mean of the observations
+        m = tf.reduce_mean(H_X, axis = 1)
+        for i in range (self.batch_size):
+            if i == 0:
+                mean = tf.reshape(tf.stack([m[i]] * self.num_ensemble), [self.num_ensemble, self.dim_z])
+            else:
+                tmp = tf.reshape(tf.stack([m[i]] * self.num_ensemble), [self.num_ensemble, self.dim_z])
+                mean = tf.concat([mean, tmp], 0)
+
+        mean = tf.reshape(mean, [self.batch_size, self.num_ensemble, self.dim_z])
+        H_A = H_X - mean
+
+        final_H_A = tf.transpose(H_A, perm=[0,2,1])
+        final_H_X = tf.transpose(H_X, perm=[0,2,1])
+
+        # get sensor reading
+        z, encoding = self.sensor_model(raw_sensor, training, learn = True)
+
+        # enable each ensemble to have a observation
+        z = tf.reshape(z, [self.batch_size, self.dim_z])
+        for i in range (self.batch_size):
+            if i == 0:
+                ensemble_z = tf.reshape(tf.stack([z[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_z])
+            else:
+                tmp = tf.reshape(tf.stack([z[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_z])
+                ensemble_z = tf.concat([ensemble_z, tmp], 0)
+
+        # make sure the ensemble shape matches
+        ensemble_z = tf.reshape(ensemble_z, [self.batch_size, self.num_ensemble, self.dim_z])
+
+        # get observation noise
+        R, diag_R = self.observation_noise_model(encoding, training, True)
+
+        # incorporate the measurement with stochastic noise
+        r_mean = np.zeros((self.dim_z))
+        r_mean = tf.convert_to_tensor(r_mean, dtype=tf.float32)
+        r_mean = tf.stack([r_mean] * self.batch_size)
+        nd_r = tfp.distributions.MultivariateNormalDiag(loc=r_mean, scale_diag=diag_R)
+        epsilon = tf.reshape(nd_r.sample(self.num_ensemble), [self.batch_size, self.num_ensemble, self.dim_z])
+
+        # the measurement y
+        y = ensemble_z + epsilon
+        y = tf.transpose(y, perm=[0,2,1])
+
+        # calculated innovation matrix s
+        innovation = (1/(self.num_ensemble -1)) * tf.matmul(final_H_A,  H_A) + R
+
+        # A matrix
+        m_A = tf.reduce_mean(state_pred, axis = 1)
+        for i in range (self.batch_size):
+            if i == 0:
+                mean_A = tf.reshape(tf.stack([m_A[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_x])
+            else:
+                tmp = tf.reshape(tf.stack([m_A[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_x])
+                mean_A = tf.concat([mean_A, tmp], 0)
+        A = state_pred - mean_A
+        A = tf.transpose(A, perm = [0,2,1])
+
+        try:
+            innovation_inv = tf.linalg.inv(innovation)
+        except:
+            innovation = self.utils_._make_valid(innovation)
+            innovation_inv = tf.linalg.inv(innovation)
+
+        # calculating Kalman gain
+        K = (1/(self.num_ensemble -1)) * tf.matmul(tf.matmul(A, H_A), innovation_inv)
+
+        # update state of each ensemble
+        y_bar = y - final_H_X
+        state_new = state_pred +  tf.transpose(tf.matmul(K, y_bar), perm=[0,2,1])
+
+        # the ensemble state mean
+        m_state_new = tf.reduce_mean(state_new, axis = 1)
+
+        # change the shape as defined in the property function
+        state_new = tf.reshape(state_new, [self.batch_size, -1])
+
+        # tuple structure of updated state
+        output = (state_new, m_state_new)
+
+        return output

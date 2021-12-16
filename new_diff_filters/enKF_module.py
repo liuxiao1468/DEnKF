@@ -641,8 +641,8 @@ class enKFUpdate(tf.keras.Model):
 
         # predefine all the necessary sub-models
 
-        # learned process noise
-        self.process_noise_model = ProcessNoise(self.batch_size, self.num_ensemble, self.dim_x, self.q_diag)
+        # # learned process noise
+        # self.process_noise_model = ProcessNoise(self.batch_size, self.num_ensemble, self.dim_x, self.q_diag)
 
         # learned observation model
         self.observation_model = ObservationModel(self.batch_size, self.num_ensemble, self.dim_x, self.dim_z, self.jacobian)
@@ -676,9 +676,9 @@ class enKFUpdate(tf.keras.Model):
         # get prediction and noise of next state
         state_pred = state_old
 
-        Q, diag_Q = self.process_noise_model(m_state, training, True)
-
-        state_pred = state_pred + Q
+        # Q, diag_Q = self.process_noise_model(m_state, training, True)
+        #
+        # state_pred = state_pred + Q
 
         '''
         update step

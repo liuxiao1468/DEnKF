@@ -25,7 +25,7 @@ def data_loader_function(data_path):
     perturb_state = []
     scale = []
     for i in range (num_sensors):
-        scale.append(random.uniform(0.8, 1.2))
+        scale.append(random.uniform(0.5, 1.5))
 
     s = 1/25.
     with open(data_path, 'rb') as f:
