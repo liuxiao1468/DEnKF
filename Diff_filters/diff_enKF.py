@@ -115,6 +115,61 @@ class ProcessModel(tf.keras.Model):
 
         return new_state
 
+class BayesianProcessModel(tf.keras.Model):
+    '''
+    process model is taking the state and get a prediction state and 
+    calculate the jacobian matrix based on the previous state and the 
+    predicted state.
+    new_state = [batch_size, 1, dim_x]
+            F = [batch_size, dim_x, dim_x]
+    state vector 4 -> fc 32 -> fc 64 -> 2
+    '''
+    def __init__(self, batch_size, num_ensemble, dim_x, jacobian, rate):
+        super(BayesianProcessModel, self).__init__()
+        self.batch_size = batch_size
+        self.num_ensemble = num_ensemble
+        self.jacobian = jacobian
+        self.dim_x = dim_x
+        self.rate = rate
+
+    def build(self, input_shape):
+        self.process_fc1 = tfp.layers.DenseFlipout(
+            units=32,
+            activation = tf.nn.relu,
+            name='process_fc1')
+        self.process_fc_add1 = tfp.layers.DenseFlipout(
+            units=64,
+            activation=tf.nn.relu,
+            name='process_fc_add1')
+        self.process_fc2 = tfp.layers.DenseFlipout(
+            units=64,
+            activation=tf.nn.relu,
+            name='process_fc2')
+        self.process_fc_add2 = tfp.layers.DenseFlipout(
+            units=32,
+            activation=tf.nn.relu,
+            name='process_fc_add2')
+        self.process_fc3 = tfp.layers.DenseFlipout(
+            units=self.dim_x,
+            activation=None,
+            name='process_fc3')
+
+    def call(self, last_state, training):
+        last_state = tf.reshape(last_state, [self.batch_size * self.num_ensemble, self.dim_x])
+
+        fc1 = self.process_fc1(last_state)
+        fcadd1 = self.process_fc_add1(fc1)
+        fc2 = self.process_fc2(fcadd1)
+        # fc2 = tf.nn.dropout(fc2, rate=self.rate)
+        fcadd2 = self.process_fc_add2(fc2)
+        # fcadd2 = tf.nn.dropout(fcadd2, rate=self.rate)
+        update = self.process_fc3(fcadd2)
+
+        new_state = last_state + update
+        new_state = tf.reshape(new_state, [self.batch_size, self.num_ensemble, self.dim_x])
+
+        return new_state
+
 class addAction(tf.keras.Model):
     '''
     action models serves in the prediction step and it will be added to predicted state before the 
@@ -291,6 +346,288 @@ class SensorModel(tf.keras.Model):
 
         return observation, encoding
 
+class BayesianSensorModel(tf.keras.Model):
+    '''
+    sensor model is used for modeling H with given states to get observation z
+    it is not required for this model to take states only, if the obervation is 
+    an image or higher dimentional tensor, it is supposed to learn a lower demention
+    representation from the observation space.
+    observation = [batch_size, dim_z]
+    encoding = [batch_size, dim_fc2]
+    '''
+    def __init__(self, batch_size, num_ensemble, dim_z):
+        super(BayesianSensorModel, self).__init__()
+        self.batch_size = batch_size
+        self.dim_z = dim_z
+        self.num_ensemble = num_ensemble
+
+    def build(self, input_shape):
+        # bayesian neural networks
+        self.bayes_sensor_fc1 = tfp.layers.DenseFlipout(
+            units=64,
+            activation=tf.nn.relu,
+            name='bayes_sensor_fc1')
+        self.bayes_sensor_fc2 = tfp.layers.DenseFlipout(
+            units=32,
+            activation=tf.nn.relu,
+            name='bayes_sensor_fc2')
+        self.bayes_sensor_fc3 = tfp.layers.DenseFlipout(
+            units=32,
+            activation=tf.nn.relu,
+            name='bayes_sensor_fc3')
+        self.bayes_sensor_fc4 = tfp.layers.DenseFlipout(
+            units=self.dim_z,
+            activation=None,
+            name='bayes_sensor_fc4')
+
+    def call(self, state, training, learn):
+        if learn == True:
+            inputs = state
+            num_feature = inputs.shape[1]
+            # expand to ensembles
+            for i in range (self.batch_size):
+                if i == 0:
+                    inputs_z = tf.reshape(tf.stack([inputs[i]] * self.num_ensemble), [1, self.num_ensemble, num_feature])
+                else:
+                    tmp = tf.reshape(tf.stack([inputs[i]] * self.num_ensemble), [1, self.num_ensemble, num_feature])
+                    inputs_z = tf.concat([inputs_z, tmp], 0)
+
+            # make sure the ensemble shape matches
+            inputs_z = tf.reshape(inputs_z, [self.batch_size * self.num_ensemble, num_feature])
+
+            fc1 = self.bayes_sensor_fc1(inputs_z)
+            fc2 = self.bayes_sensor_fc2(fc1)
+            fcadd2 = self.bayes_sensor_fc3(fc2)
+            observation = self.bayes_sensor_fc4(fcadd2)
+            encoding = fcadd2
+
+            observation = tf.reshape(observation, [self.batch_size, self.num_ensemble, self.dim_z])
+            observation_m = tf.reduce_mean(observation, axis = 1)
+
+            encoding = tf.reshape(encoding, [self.batch_size, self.num_ensemble, 32])
+            encoding = tf.reduce_mean(encoding, axis = 1)
+        else:
+            observation = state
+            encoding = state
+
+        return observation, observation_m, encoding
+
+class BayesianImageSensorModel(tf.keras.Model):
+    '''
+    sensor model is used for modeling H with given states to get observation z
+    it is not required for this model to take states only, if the obervation is 
+    an image or higher dimentional tensor, it is supposed to learn a lower demention
+    representation from the observation space.
+    observation = [batch_size, dim_z]
+    encoding = [batch_size, dim_fc2]
+    '''
+    def __init__(self, batch_size, num_ensemble, dim_z):
+        super(BayesianImageSensorModel, self).__init__()
+        self.batch_size = batch_size
+        self.dim_z = dim_z
+        self.num_ensemble = num_ensemble
+
+    def build(self, input_shape):
+        self.sensor_conv1 = tf.keras.layers.Conv2D(
+            filters=64,
+            kernel_size=7,
+            strides=[2, 2],
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_conv1')
+
+        self.sensor_conv2 = tf.keras.layers.Conv2D(
+            filters=32, kernel_size=5,
+            strides=[2, 2],
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_conv2')
+
+        self.sensor_conv3 = tf.keras.layers.Conv2D(
+            filters=32, kernel_size=3,
+            strides=[2, 2],
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_conv3')
+
+        self.sensor_conv4 = tf.keras.layers.Conv2D(
+            filters=32, kernel_size=3,
+            strides=[1, 1],
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_conv4')
+
+        self.flatten = tf.keras.layers.Flatten()
+
+        # bayesian neural networks
+        self.bayes_sensor_fc1 = tfp.layers.DenseFlipout(
+            units=64,
+            activation=tf.nn.relu,
+            name='bayes_sensor_fc1')
+        self.bayes_sensor_fc2 = tfp.layers.DenseFlipout(
+            units=32,
+            activation=tf.nn.relu,
+            name='bayes_sensor_fc2')
+        self.bayes_sensor_fc3 = tfp.layers.DenseFlipout(
+            units=32,
+            activation=tf.nn.relu,
+            name='bayes_sensor_fc3')
+        self.bayes_sensor_fc4 = tfp.layers.DenseFlipout(
+            units=self.dim_z,
+            activation=None,
+            name='bayes_sensor_fc4')
+
+    def call(self, image, training, learn):
+        if learn == True:
+            conv1 = self.sensor_conv1(image)
+            conv1 = tf.nn.max_pool2d(conv1, 2, 2, padding='SAME')
+            conv2 = self.sensor_conv2(conv1)
+            conv2 = tf.nn.max_pool2d(conv2, 2, 2, padding='SAME')
+            conv3 = self.sensor_conv3(conv2)
+            conv3 = tf.nn.max_pool2d(conv3, 2, 2, padding='SAME')
+            conv4 = self.sensor_conv4(conv3)
+
+            inputs = self.flatten(conv4)
+            num_feature = inputs.shape[1]
+
+            # expand to ensembles
+            for i in range (self.batch_size):
+                if i == 0:
+                    inputs_z = tf.reshape(tf.stack([inputs[i]] * self.num_ensemble), [1, self.num_ensemble, num_feature])
+                else:
+                    tmp = tf.reshape(tf.stack([inputs[i]] * self.num_ensemble), [1, self.num_ensemble, num_feature])
+                    inputs_z = tf.concat([inputs_z, tmp], 0)
+
+            # make sure the ensemble shape matches
+            inputs_z = tf.reshape(inputs_z, [self.batch_size * self.num_ensemble, num_feature])
+
+            fc1 = self.bayes_sensor_fc1(inputs_z)
+            fc2 = self.bayes_sensor_fc2(fc1)
+            fcadd2 = self.bayes_sensor_fc3(fc2)
+            observation = self.bayes_sensor_fc4(fcadd2)
+            encoding = fcadd2
+
+            observation = tf.reshape(observation, [self.batch_size, self.num_ensemble, self.dim_z])
+            observation_m = tf.reduce_mean(observation, axis = 1)
+
+            encoding = tf.reshape(encoding, [self.batch_size, self.num_ensemble, 32])
+            encoding = tf.reduce_mean(encoding, axis = 1)
+        else:
+            observation = state
+            encoding = state
+
+        return observation, observation_m, encoding
+
+
+class ImageSensorModel(tf.keras.Model):
+    '''
+    sensor model is used for modeling H with given states to get observation z
+    it is not required for this model to take states only, if the obervation is 
+    an image or higher dimentional tensor, it is supposed to learn a lower demention
+    representation from the observation space.
+    observation = [batch_size, dim_z]
+    encoding = [batch_size, dim_fc2]
+    '''
+    def __init__(self, batch_size, dim_z):
+        super(ImageSensorModel, self).__init__()
+        self.batch_size = batch_size
+        self.dim_z = dim_z
+
+    def build(self, input_shape):
+        self.sensor_conv1 = tf.keras.layers.Conv2D(
+            filters=64,
+            kernel_size=7,
+            strides=[2, 2],
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_conv1')
+        self.sensor_conv2 = tf.keras.layers.Conv2D(
+            filters=32, kernel_size=3,
+            strides=[2, 2],
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_conv2')
+
+        self.sensor_conv3 = tf.keras.layers.Conv2D(
+            filters=16, kernel_size=3,
+            strides=[2, 2],
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_conv3')
+
+        self.flatten = tf.keras.layers.Flatten()
+
+        self.sensor_fc1 = tf.keras.layers.Dense(
+            units=16,
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_fc1')
+        self.sensor_fc_add1 = tf.keras.layers.Dense(
+            units=64,
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_fc_add1')
+        self.sensor_fc2 = tf.keras.layers.Dense(
+            units=32,
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_fc2')
+        self.sensor_fc_add2 = tf.keras.layers.Dense(
+            units=32,
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_fc_add2')
+        self.sensor_fc3 = tf.keras.layers.Dense(
+            units=self.dim_z,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_fc3',
+            activation=None)
+
+    def call(self, image, training, learn):
+        if learn == True:
+            conv1 = self.sensor_conv1(image)
+            conv1 = tf.nn.max_pool2d(conv1, 2, 2, padding='SAME')
+            conv2 = self.sensor_conv2(conv1)
+            conv2 = tf.nn.max_pool2d(conv2, 2, 2, padding='SAME')
+            conv3 = self.sensor_conv3(conv2)
+
+            inputs = self.flatten(conv3)
+
+            fc1 = self.sensor_fc1(inputs)
+            fcadd1 = self.sensor_fc_add1(fc1)
+            fc2 = self.sensor_fc2(fcadd1)
+            fcadd2 = self.sensor_fc_add2(fc2)
+            observation = self.sensor_fc3(fcadd2)
+            encoding = fcadd2
+        else:
+            observation = state
+            encoding = state
+
+        return observation, encoding
 
 class ProcessNoise(tf.keras.Model):
     '''
@@ -590,302 +927,25 @@ class utils:
         return covar_valid
     ###########################################################################
 
-
-class DiffenKF(tf.keras.layers.AbstractRNNCell):
+class bayesiantransition(tf.keras.Model):
     def __init__(self, batch_size, num_ensemble, dropout_rate,**kwargs):
 
-        super(DiffenKF, self).__init__(**kwargs)
+        super(bayesiantransition, self).__init__(**kwargs)
 
         # initialization
         self.batch_size = batch_size
         self.num_ensemble = num_ensemble
         
-        self.dim_x = 5
-        self.dim_z = 2
+        self.dim_x = 4
 
         self.jacobian = True
-
-        self.q_diag = np.ones((self.dim_x)).astype(np.float32) * 0.5
-        self.q_diag = self.q_diag.astype(np.float32)
-
-        self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.3
-        self.r_diag = self.r_diag.astype(np.float32)
-
-        self.scale = 1
-
-        self.dropout_rate = dropout_rate
-
-
-        # predefine all the necessary sub-models
-        # learned sensor model for processing the images
-
-        # learned process model
-        self.process_model = ProcessModel(self.batch_size, self.num_ensemble, self.dim_x, self.jacobian, self.dropout_rate)
-
-        # learned process noise
-        self.process_noise_model = ProcessNoise(self.batch_size, self.num_ensemble, self.dim_x, self.q_diag)
-
-        # learned observation model
-        self.observation_model = ObservationModel(self.batch_size, self.num_ensemble, self.dim_x, self.dim_z, self.jacobian)
-
-        # learned observation noise
-        self.observation_noise_model = ObservationNoise(self.batch_size, self.num_ensemble, self.dim_z, self.r_diag, self.jacobian)
-
-        # learned sensor model
-        self.sensor_model = SensorModel(self.batch_size, self.dim_z)
-
-
-    @property
-    def state_size(self):
-        """size(s) of state(s) used by this cell.
-        It can be represented by an Integer, a TensorShape or a tuple of
-        Integers or TensorShapes.
-        """
-        # estimated state, its covariance, and the step number
-        return [[self.num_ensemble * self.dim_x], [self.dim_x], [1]]
-
-    @property
-    def output_size(self):
-        """Integer or TensorShape: size of outputs produced by this cell."""
-        # estimated state, observations, Q, R
-        return ([self.dim_x], [self.num_ensemble * self.dim_x], 
-                [self.dim_z], [self.dim_z])
-
-    def call(self, inputs, states):
-        # decompose inputs and states
-        raw_sensor, actions = inputs
-
-        raw_sensor = tf.reshape(raw_sensor, [self.batch_size, 1, self.dim_z])
-
-        state_old, m_state, step = states
-
-        state_old = tf.reshape(state_old, [self.batch_size, self.num_ensemble, self.dim_x])
-
-        m_state = tf.reshape(m_state, [self.batch_size, self.dim_x])
-
-        training = True
-
-        missing_data = False
-        missing = tf.constant([0., 0.], dtype=tf.float32)
-        if (np.array(raw_sensor[0][0]) == np.array(missing)).any():
-            missing_data = True
-
-        '''
-        prediction step
-        '''
-        # get prediction and noise of next state
-        state_pred = self.process_model(state_old, training)
-        Q, diag_Q = self.process_noise_model(m_state, training, True)
-        state_pred = state_pred + Q
-
-        '''
-        update step
-        '''
-        # get predicted observations
-        learn = True
-        H_X = self.observation_model(state_pred, training, learn)
-
-        # get the emsemble mean of the observations
-        m = tf.reduce_mean(H_X, axis = 1)
-        for i in range (self.batch_size):
-            if i == 0:
-                mean = tf.reshape(tf.stack([m[i]] * self.num_ensemble), [self.num_ensemble, self.dim_z])
-            else:
-                tmp = tf.reshape(tf.stack([m[i]] * self.num_ensemble), [self.num_ensemble, self.dim_z])
-                mean = tf.concat([mean, tmp], 0)
-
-        mean = tf.reshape(mean, [self.batch_size, self.num_ensemble, self.dim_z])
-        H_A = H_X - mean
-
-        final_H_A = tf.transpose(H_A, perm=[0,2,1])
-        final_H_X = tf.transpose(H_X, perm=[0,2,1])
-
-        # get sensor reading
-        z, encoding = self.sensor_model(raw_sensor, training, True)
-
-        # enable each ensemble to have a observation
-        z = tf.reshape(z, [self.batch_size, self.dim_z])
-        for i in range (self.batch_size):
-            if i == 0:
-                ensemble_z = tf.reshape(tf.stack([z[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_z])
-            else:
-                tmp = tf.reshape(tf.stack([z[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_z])
-                ensemble_z = tf.concat([ensemble_z, tmp], 0)
-
-        # make sure the ensemble shape matches
-        ensemble_z = tf.reshape(ensemble_z, [self.batch_size, self.num_ensemble, self.dim_z])
-
-        # get observation noise
-        R, diag_R = self.observation_noise_model(encoding, training, True)
-
-        # incorporate the measurement with stochastic noise
-        r_mean = np.zeros((self.dim_z))
-        r_mean = tf.convert_to_tensor(r_mean, dtype=tf.float32)
-        r_mean = tf.stack([r_mean] * self.batch_size)
-        nd_r = tfp.distributions.MultivariateNormalDiag(loc=r_mean, scale_diag=diag_R)
-        epsilon = tf.reshape(nd_r.sample(self.num_ensemble), [self.batch_size, self.num_ensemble, self.dim_z])
-
-        # the measurement y
-        y = ensemble_z + epsilon
-        y = tf.transpose(y, perm=[0,2,1])
-
-
-        # calculated innovation matrix s
-        innovation = (1/(self.num_ensemble -1)) * tf.matmul(final_H_A,  H_A) + R
-
-        # A matrix
-        m_A = tf.reduce_mean(state_pred, axis = 1)
-        for i in range (self.batch_size):
-            if i == 0:
-                mean_A = tf.reshape(tf.stack([m_A[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_x])
-            else:
-                tmp = tf.reshape(tf.stack([m_A[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_x])
-                mean_A = tf.concat([mean_A, tmp], 0)
-        A = state_pred - mean_A
-        A = tf.transpose(A, perm = [0,2,1])
-
-        try:
-            innovation_inv = tf.linalg.inv(innovation)
-        except:
-            innovation = self.utils_._make_valid(innovation)
-            innovation_inv = tf.linalg.inv(innovation)
-
-
-        # calculating Kalman gain
-        K = (1/(self.num_ensemble -1)) * tf.matmul(tf.matmul(A, H_A), innovation_inv)
-
-
-        # update state of each ensemble
-        y_bar = y - final_H_X
-        if missing_data == False:
-            state_new = state_pred +  tf.transpose(tf.matmul(K, y_bar), perm=[0,2,1])
-        else:
-            state_new = state_pred
-
-        # the ensemble state mean
-        m_state_new = tf.reduce_mean(state_new, axis = 1)
-
-        # change the shape as defined in the property function
-        state_new = tf.reshape(state_new, [self.batch_size, -1])
-
-        # tuple structure of updated state
-        state_hat = (state_new, m_state_new, step+1)
-
-        # tuple structure of the output
-        z = tf.reshape(z, [self.batch_size, -1])
-
-        # output = (m_state_new, state_new, z, 
-        #     tf.reshape(diag_R, [self.batch_size, -1]), 
-        #     tf.reshape(diag_Q, [self.batch_size, -1]))
-        output = (m_state_new, state_new, z, 
-            tf.reshape(diag_R, [self.batch_size, -1]))
-
-        # print('===========')
-        # print('output: ',state_hat)
-        # print('===========')
-
-        return output, state_hat
-
-class RNNmodel(tf.keras.Model):
-    def __init__(self, batch_size, num_ensemble, dropout_rate, hetero_q=False, hetero_r=True, **kwargs):
-
-        super(RNNmodel, self).__init__(**kwargs)
-
-        self.batch_size = batch_size
-
-        self.num_ensemble = num_ensemble
-
-        self.dropout_rate = dropout_rate
-
-        # instantiate the filter
-        self.filter = DiffenKF(batch_size, num_ensemble, dropout_rate)
-
-        # wrap the filter in a RNN layer
-        self.rnn_layer = tf.keras.layers.RNN(self.filter, return_sequences=True,unroll=False)
-
-        # define the initial belief of the filter
-        X = np.array([0,0,1,0,1])
-        X = tf.convert_to_tensor(X, dtype=tf.float32)
-
-        ensemble_X = tf.stack([X] * (self.num_ensemble * self.batch_size))
-        m_X = tf.stack([X] * self.batch_size)
-
-        ensemble_X = tf.reshape(ensemble_X, [batch_size, -1])
-        m_X = tf.reshape(m_X, [batch_size, -1])
-
-        step = tf.zeros([batch_size,1])
-
-        self.state_0 = (ensemble_X, m_X, step)
-
-    def call(self, inputs):
-        raw_sensor = inputs
-
-        # action is B*u, which is added to x_{t} after the prediction step 
-        action = np.array([1, np.radians(0.1)])
-        action = tf.convert_to_tensor(action, dtype=tf.float32)
-        action = tf.stack([action] * self.batch_size)
-        action = tf.reshape(action, [self.batch_size, 1, 2])
-
-        # fake_actions = tf.zeros([batch_size, 1, 2])
-        real_actions = action
-        inputs = (raw_sensor, real_actions)
-
-        # print(self.state_0[0].shape)
-        # print(inputs[0].shape)
-
-        # print('-------------------- ',inputs)
-
-        outputs = self.rnn_layer(inputs, initial_state=self.state_0)
-        
-        return outputs
-
-    @classmethod
-    def from_config(cls, config):
-        return cls(**config)
-
-'''
-new development with two RNN models
-'''
-class transition(tf.keras.layers.AbstractRNNCell):
-    def __init__(self, batch_size, num_ensemble, dropout_rate,**kwargs):
-
-        super(transition, self).__init__(**kwargs)
-
-        # initialization
-        self.batch_size = batch_size
-        self.num_ensemble = num_ensemble
-        
-        self.dim_x = 5
-
-        self.jacobian = True
-
-        self.q_diag = np.ones((self.dim_x)).astype(np.float32) * 0.3
-        self.q_diag = self.q_diag.astype(np.float32)
 
         self.dropout_rate = dropout_rate
 
         # learned process model
-        self.process_model = ProcessModel(self.batch_size, self.num_ensemble, self.dim_x, self.jacobian, self.dropout_rate)
+        self.bayesian_model = BayesianProcessModel(self.batch_size, self.num_ensemble, self.dim_x, self.jacobian, self.dropout_rate)
 
-        # learned process noise
-        self.process_noise_model = ProcessNoise(self.batch_size, self.num_ensemble, self.dim_x, self.q_diag)
-
-    @property
-    def state_size(self):
-        """size(s) of state(s) used by this cell.
-        It can be represented by an Integer, a TensorShape or a tuple of
-        Integers or TensorShapes.
-        """
-        # estimated state, its covariance, and the step number
-        return [[self.num_ensemble * self.dim_x], [self.dim_x]]
-
-    @property
-    def output_size(self):
-        """Integer or TensorShape: size of outputs produced by this cell."""
-        # estimated state, observations, Q, R
-        return ([self.num_ensemble * self.dim_x], [self.dim_x])
-
-    def call(self, input_states, state_hat):
+    def call(self, input_states):
 
         state_old, m_state = input_states
 
@@ -895,99 +955,42 @@ class transition(tf.keras.layers.AbstractRNNCell):
 
         # get prediction and noise of next state
         training = True
-        state_pred = self.process_model(state_old, training)
-
-        Q, diag_Q = self.process_noise_model(m_state, training, True)
-        state_pred = state_pred + Q
+        state_pred = self.bayesian_model(state_old, training)
 
         # the ensemble state mean
         m_state = tf.reduce_mean(state_pred, axis = 1)
 
-        state_pred = tf.reshape(state_pred, [self.batch_size, -1])
-
-        state_hat = (state_pred, m_state)
-
-        ensemble = tf.reshape(state_pred, [self.batch_size, 1, self.num_ensemble* self.dim_x])
+        ensemble = tf.reshape(state_pred, [self.batch_size, self.num_ensemble, self.dim_x])
 
         m_state = tf.reshape(m_state, [self.batch_size, 1, self.dim_x])
 
         # tuple structure of updated state
         output = (ensemble, m_state)
 
-        return output, state_hat
+        return output
 
 
-class TransitionRNN(tf.keras.Model):
-    def __init__(self, batch_size, num_ensemble, dropout_rate, hetero_q=False, hetero_r=True, **kwargs):
 
-        super(TransitionRNN, self).__init__(**kwargs)
-
-        self.batch_size = batch_size
-
-        self.num_ensemble = num_ensemble
-
-        self.dropout_rate = dropout_rate
-
-        # instantiate the filter
-        self.filter = transition(batch_size, num_ensemble, dropout_rate)
-
-        # wrap the filter in a RNN layer
-        self.rnn_layer = tf.keras.layers.RNN(self.filter, return_sequences=True,unroll=False)
-
-        # define the initial belief of the filter
-        X = np.array([0,0,1,0,1])
-        X = tf.convert_to_tensor(X, dtype=tf.float32)
-
-        ensemble_X = tf.stack([X] * (self.num_ensemble * self.batch_size))
-        m_X = tf.stack([X] * self.batch_size)
-
-        ensemble_X = tf.reshape(ensemble_X, [batch_size, -1])
-        m_X = tf.reshape(m_X, [batch_size, -1])
-
-        self.state_0 = (ensemble_X, m_X)
-
-    def call(self, input_states):
-
-        ensemble = input_states[0]
-
-        ensemble = tf.reshape(ensemble, [self.batch_size, -1])
-        ensemble = tf.reshape(ensemble, [self.batch_size, 1, self.num_ensemble*5])
-        m_state = tf.reshape(input_states[1], [self.batch_size, -1])
-        m_state = tf.reshape(m_state, [self.batch_size, 1, 5])
-
-        input_states = (ensemble, m_state)
-        # print(self.state_0[0].shape)
-        # print(self.state_0[1].shape)
-
-        # print('---------')
-        # print(ensemble.shape)
-        # print(m_state.shape)
-
-        outputs = self.rnn_layer(input_states, initial_state=self.state_0)
-        
-        return outputs
-
-    @classmethod
-    def from_config(cls, config):
-        return cls(**config)
-
-class enKFUpdate(tf.keras.Model):
+# Xiao's version
+class enKFMLP(tf.keras.Model):
     def __init__(self, batch_size, num_ensemble, dropout_rate,**kwargs):
-        super(enKFUpdate, self).__init__()
+        super(enKFMLP, self).__init__()
 
         # initialization
         self.batch_size = batch_size
         self.num_ensemble = num_ensemble
         
-        self.dim_x = 5
-        self.dim_z = 2
+        self.dim_x = 10
+        self.dim_z = 10
 
         self.jacobian = True
 
-        self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.3
+        self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.1
         self.r_diag = self.r_diag.astype(np.float32)
 
         self.dropout_rate = dropout_rate
+
+        self.bayesian_process_model = BayesianProcessModel(self.batch_size, self.num_ensemble, self.dim_x, self.jacobian, self.dropout_rate)
 
         # learned observation model
         self.observation_model = ObservationModel(self.batch_size, self.num_ensemble, self.dim_x, self.dim_z, self.jacobian)
@@ -996,16 +999,13 @@ class enKFUpdate(tf.keras.Model):
         self.observation_noise_model = ObservationNoise(self.batch_size, self.num_ensemble, self.dim_z, self.r_diag, self.jacobian)
 
         # learned sensor model
-        self.sensor_model = SensorModel(self.batch_size, self.dim_z)
+        self.sensor_model = BayesianImageSensorModel(self.batch_size, self.num_ensemble, self.dim_z)
 
         self.utils_ = utils()
 
     def call(self, inputs, states):
-
         # decompose inputs and states
         raw_sensor = inputs
-
-        raw_sensor = tf.reshape(raw_sensor, [self.batch_size, 1, self.dim_z])
 
         state_old, m_state = states
 
@@ -1013,21 +1013,13 @@ class enKFUpdate(tf.keras.Model):
 
         m_state = tf.reshape(m_state, [self.batch_size, self.dim_x])
 
-        training = True
 
-        '''
-        prediction step
-        '''
         # get prediction and noise of next state
-        state_pred = state_old
+        training = True
+        state_pred = self.bayesian_process_model(state_old, training)
 
-        # Q, diag_Q = self.process_noise_model(m_state, training, True)
 
-        # state_pred = state_pred + Q
-
-        '''
-        update step
-        '''
+        # update step
         # get predicted observations
         learn = True
         H_X = self.observation_model(state_pred, training, learn)
@@ -1048,32 +1040,14 @@ class enKFUpdate(tf.keras.Model):
         final_H_X = tf.transpose(H_X, perm=[0,2,1])
 
         # get sensor reading
-        z, encoding = self.sensor_model(raw_sensor, training, learn = True)
-
-        # enable each ensemble to have a observation
-        z = tf.reshape(z, [self.batch_size, self.dim_z])
-        for i in range (self.batch_size):
-            if i == 0:
-                ensemble_z = tf.reshape(tf.stack([z[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_z])
-            else:
-                tmp = tf.reshape(tf.stack([z[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_z])
-                ensemble_z = tf.concat([ensemble_z, tmp], 0)
-
-        # make sure the ensemble shape matches
-        ensemble_z = tf.reshape(ensemble_z, [self.batch_size, self.num_ensemble, self.dim_z])
+        ensemble_z, z, encoding = self.sensor_model(raw_sensor, training, learn = True)
 
         # get observation noise
         R, diag_R = self.observation_noise_model(encoding, training, True)
 
-        # incorporate the measurement with stochastic noise
-        r_mean = np.zeros((self.dim_z))
-        r_mean = tf.convert_to_tensor(r_mean, dtype=tf.float32)
-        r_mean = tf.stack([r_mean] * self.batch_size)
-        nd_r = tfp.distributions.MultivariateNormalDiag(loc=r_mean, scale_diag=diag_R)
-        epsilon = tf.reshape(nd_r.sample(self.num_ensemble), [self.batch_size, self.num_ensemble, self.dim_z])
 
         # the measurement y
-        y = ensemble_z + epsilon
+        y = ensemble_z
         y = tf.transpose(y, perm=[0,2,1])
 
         # calculated innovation matrix s
@@ -1106,10 +1080,17 @@ class enKFUpdate(tf.keras.Model):
         # the ensemble state mean
         m_state_new = tf.reduce_mean(state_new, axis = 1)
 
-        # change the shape as defined in the property function
-        state_new = tf.reshape(state_new, [self.batch_size, -1])
+        m_state_new = tf.reshape(m_state_new, [self.batch_size, 1, self.dim_x])
+
+        m_state_pred = tf.reduce_mean(state_pred, axis = 1)
+
+        m_state_pred = tf.reshape(m_state_pred, [self.batch_size, 1, self.dim_x])
+
+        z = tf.reshape(z, [self.batch_size, 1, self.dim_z])
 
         # tuple structure of updated state
-        output = (state_new, m_state_new)
+        output = (state_new, m_state_new, m_state_pred, z)
 
         return output
+
+

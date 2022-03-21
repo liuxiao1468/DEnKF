@@ -10,98 +10,19 @@ import time
 import pickle
 import pdb
 import tensorflow_probability as tfp
+import csv
+import cv2
 
 import diff_enKF
+from dataloader import DataLoader
 
-'''
-data loader for training the toy example
-observation = [timestep, batch_size, 1, dim_z] -> input data
-states_true = [timestep, batch_size, 1, dim_x] -> ground truth
-'''
-def data_loader_function(data_path):
-    name = ['constant', 'exp']
-    num_sensors = 100
-
-    observations = []
-    states_true = []
-
-    s = 1/25.
-    with open(data_path, 'rb') as f:
-        traj = pickle.load(f)
-    for i in range (len(traj['xTrue'])):
-        observation = []
-        state = []
-        for j in range (num_sensors):
-            observe = [traj['sensors'][i][0][j]*s, traj['sensors'][i][1][j]*s]
-            observation.append(observe)
-            angles = traj['xTrue'][i][2]
-            xTrue = [traj['xTrue'][i][0]*s, traj['xTrue'][i][1]*s, np.cos(angles), np.sin(angles), traj['xTrue'][i][3]]
-            state.append(xTrue)
-        observations.append(observation)
-        states_true.append(state)
-    observations = np.array(observations)
-    observations = tf.reshape(observations, [len(traj['xTrue']), num_sensors, 1, 2])
-    states_true = np.array(states_true)
-    states_true = tf.reshape(states_true, [len(traj['xTrue']), num_sensors, 1, 5])
-    return observations, states_true
-
-def data_loader_teacher(states_true):
-    gt_pre = states_true[0:-1, :, :, :]
-    gt_now = states_true[1:,:, :, :]
-    return gt_pre, gt_now
-
-def load_train_teacher(batch_size, observations, gt_pre, gt_now):
-    '''
-    data preprocessing steps
-    '''
-    select = random.sample(range(0, 90), batch_size)
-    raw_sensor = []
-    gt_pre_ = []
-    gt_now_ = []
-    for idx in select:
-        raw_sensor.append(observations[:, idx, :,:])
-        gt_pre_.append(gt_pre[:, idx, :,:])
-        gt_now_.append(gt_now[:, idx, :,:])
-
-    raw_sensor = tf.convert_to_tensor(raw_sensor, dtype=tf.float32)
-    raw_sensor = tf.reshape(raw_sensor, [observations.shape[0], batch_size, 1, 2])
-    gt_pre_ = tf.convert_to_tensor(gt_pre_, dtype=tf.float32)
-    gt_pre_ = tf.reshape(gt_pre_, [gt_pre.shape[0], batch_size, 1, 5])
-    gt_now_ = tf.convert_to_tensor(gt_now_, dtype=tf.float32)
-    gt_now_ = tf.reshape(gt_pre_, [gt_now.shape[0], batch_size, 1, 5])
-    return raw_sensor, gt_pre_, gt_now_
-
-def load_train(batch_size, observations, states_true):
-    '''
-    data preprocessing steps
-    '''
-    select = random.sample(range(0, 90), batch_size)
-    raw_sensor = []
-    gt = []
-    for idx in select:
-        raw_sensor.append(observations[:, idx, :,:])
-        gt.append(states_true[:, idx, :,:])
-
-    raw_sensor = tf.convert_to_tensor(raw_sensor, dtype=tf.float32)
-    raw_sensor = tf.reshape(raw_sensor, [observations.shape[0], batch_size, 1, 2])
-    gt = tf.convert_to_tensor(gt, dtype=tf.float32)
-    gt = tf.reshape(gt, [states_true.shape[0], batch_size, 1, 5])
-    return raw_sensor, gt
-
-def mask_observation(observations, ratio):
-    length = observations.shape[0]
-    observations = tf.Variable(observations)
-    select = random.sample(range(0, length), int(length* ratio))
-    for idx in select:
-        observations[idx, :, :, :].assign(observations[idx, :, :, :]*0.0 + 0.0)
-    masked_observation = tf.cast(observations, dtype=tf.float32)
-    return masked_observation
 
 '''
 define the training loop
 '''
 def run_filter(mode):
     tf.keras.backend.clear_session()
+    dim_x = 10
     if mode == True:
         # define batch_size
         batch_size = 64
@@ -110,122 +31,143 @@ def run_filter(mode):
         num_ensemble = 32
 
         # define dropout rate
-        dropout_rate = 0.4
+        dropout_rate = 0.1
 
         # load the model
-        model = diff_enKF.RNNmodel(batch_size, num_ensemble, dropout_rate)
+        model = diff_enKF.enKFMLP(batch_size, num_ensemble, dropout_rate)
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
-        # epoch = 50
-        #
-        # pred_steps = 1
-        #
-        # '''
-        # train with observations
-        # '''
-        #
-        # for k in range (epoch):
-        #     '''
-        #     data preprocessing steps
-        #     '''
-        #     raw_sensor, gt = load_train(batch_size, observations, states_true)
-        #
-        #     print("========================================= working on epoch %d =========================================: " % (k))
-        #
-        #     for i in range(states_true.shape[0]-pred_steps):
-        #
-        #         start = time.time()
-        #
-        #         with tf.GradientTape() as tape:
-        #             for step in range (pred_steps):
-        #                 if step == 0:
-        #                     out = model(raw_sensor[i+step])
-        #                     state_h = out[0]
-        #                     loss = get_loss._mse( gt[i+step] - state_h)
-        #                 else:
-        #                     out = model(raw_sensor[i+step])
-        #                     state_h = out[0]
-        #                     loss = loss + get_loss._mse( gt[i+step] - state_h)
-        #                 loss = loss*0.1
-        #
-        #         grads = tape.gradient(loss, model.trainable_weights)
-        #         optimizer.apply_gradients(zip(grads, model.trainable_weights))
-        #         end = time.time()
-        #
-        #         # Log every 50 batches.
-        #         if i % 100 == 0:
-        #             print("Training loss at step %d: %.4f (took %.3f seconds) " %
-        #                   (i, float(loss), float(end-start)))
-        #             print(state_h[0])
-        #             print(gt[i][0])
-        #             print('---')
-        #     if (k+1) % epoch == 0:
-        #         model.save_weights('./models/enkF_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
-        #         print('model is saved at this epoch')
-        '''
-        train with missing observations
-        '''
-        pred_steps = 1
-        epoch = 50
-        raw_sensor, gt = load_train(batch_size, observations, states_true)
-        _ = model(raw_sensor[0])
-        model.load_weights('./models/enkF_' + 'v4.0' + '_' + name[index] + str(49).zfill(3) + '.h5')
+
+        epoch = 200
         for k in range (epoch):
-            '''
-            data preprocessing steps
-            '''
-            raw_sensor, gt = load_train(batch_size, observations, states_true)
-            raw_sensor = mask_observation(raw_sensor, 0.3)
-
+            print('end-to-end wholemodel')
             print("========================================= working on epoch %d =========================================: " % (k))
-
-            for i in range(states_true.shape[0]-pred_steps):
-
-                start = time.time()
-
-                with tf.GradientTape() as tape:
-                    for step in range (pred_steps):
-                        if step == 0:
-                            out = model(raw_sensor[i+step])
-                            state_h = out[0]
-                            loss = get_loss._mse( gt[i+step] - state_h)
-                        else:
-                            out = model(raw_sensor[i+step])
-                            state_h = out[0]
-                            loss = loss + get_loss._mse( gt[i+step] - state_h)
-                        loss = loss*0.1
-
+            steps = math.floor(200*1000 /batch_size)
+            for step in range(steps):
+                csv_path = './dataset/dataset_UR5.csv'
+                gt_pre, gt_now, raw_sensor = DataLoader.load_train_data_All(csv_path, batch_size)
+                with tf.GradientTape(persistent=True) as tape:
+                    start = time.time()
+                    states = DataLoader.format_state(gt_pre, batch_size, num_ensemble, dim_x)
+                    out = model(raw_sensor,states)
+                    state_h = out[1]
+                    state_p = out[2]
+                    y = out[3]
+                    loss_1 = get_loss._mse(gt_now - state_p)
+                    loss_2 = get_loss._mse(gt_now - y)
+                    loss = get_loss._mse(gt_now - state_h)
+                    end = time.time()
+                    if step %500 ==0:
+                        print("Training loss at step %d: %.4f (took %.3f seconds) " %
+                              (step, float(loss), float(end-start)))
+                        print(state_p[0])
+                        print(y[0])
+                        print(state_h[0])
+                        print(gt_now[0])
+                        print('---')
                 grads = tape.gradient(loss, model.trainable_weights)
                 optimizer.apply_gradients(zip(grads, model.trainable_weights))
-                end = time.time()
 
-                # Log every 50 batches.
-                if i % 100 == 0:
-                    print("Training loss at step %d: %.4f (took %.3f seconds) " %
-                          (i, float(loss), float(end-start)))
-                    print(state_h[0])
-                    print(gt[i][0])
-                    print('---')
+                grads = tape.gradient(loss_1, model.layers[0].trainable_weights)
+                optimizer.apply_gradients(zip(grads, model.layers[0].trainable_weights))
+
+                grads = tape.gradient(loss_2, model.layers[3].trainable_weights)
+                optimizer.apply_gradients(zip(grads, model.layers[3].trainable_weights))
+
             if (k+1) % epoch == 0:
-                model.save_weights('./models/enkF_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
+                model.save_weights('./models/bayes_enkf_'+version+'_'+name[index]+str(epoch).zfill(3)+'.h5')
                 print('model is saved at this epoch')
+            if (k+1) % 5 ==0:
+                model.save_weights('./models/bayes_enkf_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
+                print('model is saved at this epoch')
+
+                # define batch_size
+                test_batch_size = 1
+
+                test_num_ensemble = 32
+
+                test_dropout_rate = 0.1
+
+                # load the model
+                model_test = diff_enKF.enKFMLPAll(test_batch_size, test_num_ensemble, test_dropout_rate)
+
+                csv_path = './dataset/dataset_UR5_test.csv'
+
+                test_gt_pre, test_gt_now, test_raw_sensor = DataLoader.load_test_data_All(csv_path, test_batch_size)
+
+                # load init state
+                inputs = test_raw_sensor[0]
+                init_states = DataLoader.format_init_state(test_gt_pre[0], test_batch_size, test_num_ensemble,dim_x)
+
+                dummy = model_test(inputs, init_states)
+                model_test.load_weights('./models/bayes_enkf_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
+                for layer in model_test.layers:
+                    layer.trainable = False
+                model_test.summary()
+
+                '''
+                run a test demo and save the state of the test demo
+                '''
+                data = {}
+                data_save = []
+                emsemble_save = []
+                gt_save = []
+                transition_save = []
+                observation_save = []
+
+                for t in range (test_gt_now.shape[0]):
+                    if t == 0:
+                        states = init_states
+                    out = model_test(test_raw_sensor[t], states)
+                    if t%10 == 0:
+                        print('---')
+                        print(out[1])
+                        print(test_gt_now[t])
+                    states = (out[0], out[1])
+                    state_out = np.array(out[1])
+                    gt_out = np.array(test_gt_now[t])
+                    ensemble = np.array(tf.reshape(out[0], [test_num_ensemble, dim_x]))
+                    transition_out = np.array(out[2])
+                    observation_out = np.array(out[3])
+                    data_save.append(state_out)
+                    emsemble_save.append(ensemble)
+                    gt_save.append(gt_out)
+                    observation_save.append(observation_out)
+                    transition_save.append(transition_out)
+                data['state'] = data_save
+                data['ensemble'] = emsemble_save
+                data['gt'] = gt_save
+                data['observation'] = observation_save
+                data['transition'] = transition_save
+
+                with open('./output/bayes_enkf_'+version+'_'+ name[index]+str(k).zfill(3)+'.pkl', 'wb') as f:
+                    pickle.dump(data, f)
+
     else:
+        k = 44
         # define batch_size
-        batch_size = 1
+        test_batch_size = 1
 
-        num_ensemble = 32
+        test_num_ensemble = 32
 
-        dropout_rate = 0.4
+        test_dropout_rate = 0.1
 
         # load the model
-        model = diff_enKF.RNNmodel(batch_size, num_ensemble, dropout_rate)
+        model_test = diff_enKF.enKFMLP(test_batch_size, test_num_ensemble, test_dropout_rate)
 
-        test_demo = observations[:, 98, :,:]
-        test_demo = tf.reshape(test_demo, [observations.shape[0], 1, 1, 2])
-        test_demo = mask_observation(test_demo, 0.2)
-        dummy = model(test_demo[0])
-        model.load_weights('./models/enkF_'+'v4.0'+'_'+name[index]+str(49).zfill(3)+'.h5')
-        model.summary()
+        csv_path = './dataset/dataset_UR5_test.csv'
+
+        test_gt_pre, test_gt_now, test_raw_sensor = DataLoader.load_test_data_All(csv_path, test_batch_size)
+
+        # load init state
+        inputs = test_raw_sensor[0]
+        init_states = DataLoader.format_init_state(test_gt_pre[0], test_batch_size, test_num_ensemble,dim_x)
+
+        dummy = model_test(inputs, init_states)
+        model_test.load_weights('./models/bayes_enkf_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
+        for layer in model_test.layers:
+            layer.trainable = False
+        model_test.summary()
 
         '''
         run a test demo and save the state of the test demo
@@ -233,18 +175,40 @@ def run_filter(mode):
         data = {}
         data_save = []
         emsemble_save = []
+        gt_save = []
+        transition_save = []
+        observation_save = []
 
-        for t in range (states_true.shape[0]):
-            out = model(test_demo[t])
-            state_out = np.array(out[0])
-            ensemble = np.array(tf.reshape(out[1], [num_ensemble, 5]))
+        for t in range (test_gt_now.shape[0]):
+            if t == 0:
+                states = init_states
+            out = model_test(test_raw_sensor[t], states)
+            if t%10 == 0:
+                print('---')
+                print(out[1]) # final state
+                print(out[2]) # transition 
+                print(out[3]) # sensor model
+                print(test_gt_now[t])
+            states = (out[0], out[1])
+            state_out = np.array(out[1])
+            gt_out = np.array(test_gt_now[t])
+            ensemble = np.array(tf.reshape(out[0], [test_num_ensemble, dim_x]))
+            transition_out = np.array(out[2])
+            observation_out = np.array(out[3])
             data_save.append(state_out)
             emsemble_save.append(ensemble)
+            gt_save.append(gt_out)
+            observation_save.append(observation_out)
+            transition_save.append(transition_out)
         data['state'] = data_save
         data['ensemble'] = emsemble_save
+        data['gt'] = gt_save
+        data['observation'] = observation_save
+        data['transition'] = transition_save
 
-        with open('./output/'+version+'_'+ name[index] +'_02.pkl', 'wb') as f:
+        with open('./output/bayes_enkf_'+version+'_'+ name[index]+str(k).zfill(3)+'test.pkl', 'wb') as f:
             pickle.dump(data, f)
+        
 
 
 '''
@@ -256,14 +220,13 @@ get_loss = diff_enKF.getloss()
 load data for training
 '''
 global name 
-name = ['constant', 'exp']
+name = ['joint', 'EE', 'all']
 global index
-index = 1
-observations, states_true = data_loader_function('./dataset/100_demos_'+name[index]+'.pkl')
+index = 2
 
 global version
-version = 'v4.2'
-
+version = 'v7.3-ur5'
+old_version = version
 
 def main():
 
