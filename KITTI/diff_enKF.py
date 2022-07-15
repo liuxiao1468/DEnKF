@@ -43,6 +43,18 @@ The filter is suppose to learn the process noise model Q, observation noise mode
 and the observation model h(.)
 Author: Xiao Liu -> I have made decent amount of changes to the original codebase.
 '''
+class transform:
+    def __init__(self):
+        super(transform, self).__init__()
+        parameters = pickle.load(open('parameters.pkl', 'rb'))
+        self.v_m = parameters['v_m']
+        self.v_std = parameters['v_std']
+        self.theta_m = parameters['theta_m']
+        self.theta_std = parameters['theta_std']
+        self.theta_dot_m = parameters['theta_dot_m']
+        self.theta_dot_std = parameters['theta_dot_std']
+
+
 class ProcessModel(tf.keras.Model):
     '''
     process model is taking the state and get a prediction state and 
@@ -52,13 +64,11 @@ class ProcessModel(tf.keras.Model):
             F = [batch_size, dim_x, dim_x]
     state vector 4 -> fc 32 -> fc 64 -> 2
     '''
-    def __init__(self, batch_size, num_ensemble, dim_x, jacobian, rate):
+    def __init__(self, batch_size, num_ensemble, dim_x):
         super(ProcessModel, self).__init__()
         self.batch_size = batch_size
         self.num_ensemble = num_ensemble
-        self.jacobian = jacobian
         self.dim_x = dim_x
-        self.rate = rate
 
     def build(self, input_shape):
         self.process_fc1 = tf.keras.layers.Dense(
@@ -101,13 +111,9 @@ class ProcessModel(tf.keras.Model):
         last_state = tf.reshape(last_state, [self.batch_size * self.num_ensemble, self.dim_x])
 
         fc1 = self.process_fc1(last_state)
-        # fc1 = tf.nn.dropout(fc1, rate=self.rate)
         fcadd1 = self.process_fc_add1(fc1)
-        # fcadd1 = tf.nn.dropout(fcadd1, rate=self.rate)
         fc2 = self.process_fc2(fcadd1)
-        fc2 = tf.nn.dropout(fc2, rate=self.rate)
         fcadd2 = self.process_fc_add2(fc2)
-        fcadd2 = tf.nn.dropout(fcadd2, rate=self.rate)
         update = self.process_fc3(fcadd2)
 
         new_state = last_state + update
@@ -117,20 +123,16 @@ class ProcessModel(tf.keras.Model):
 
 class BayesianProcessModel(tf.keras.Model):
     '''
-    process model is taking the state and get a prediction state and 
-    calculate the jacobian matrix based on the previous state and the 
-    predicted state.
-    new_state = [batch_size, 1, dim_x]
-            F = [batch_size, dim_x, dim_x]
-    state vector 4 -> fc 32 -> fc 64 -> 2
+    process model is taking the state and get a distribution of a prediction state,
+    which is represented as ensemble.
+    new_state = [batch_size, num_ensemble, dim_x]
+    state vector dim_x -> fc 32 -> fc 64 -> fc 32 -> dim_x
     '''
-    def __init__(self, batch_size, num_ensemble, dim_x, jacobian, rate):
+    def __init__(self, batch_size, num_ensemble, dim_x):
         super(BayesianProcessModel, self).__init__()
         self.batch_size = batch_size
         self.num_ensemble = num_ensemble
-        self.jacobian = jacobian
         self.dim_x = dim_x
-        self.rate = rate
 
     def build(self, input_shape):
         self.process_fc1 = tfp.layers.DenseFlipout(
@@ -154,15 +156,20 @@ class BayesianProcessModel(tf.keras.Model):
             activation=None,
             name='process_fc3')
 
-    def call(self, last_state, training):
+    def call(self, last_state):
         last_state = tf.reshape(last_state, [self.batch_size * self.num_ensemble, self.dim_x])
 
-        fc1 = self.process_fc1(last_state)
+        # we pass the action into the process model with the cosine and sine
+        theta = tf.reshape(last_state[:,2], [self.batch_size * self.num_ensemble, 1])
+        theta = -(theta-np.pi/2)
+        st = tf.sin(theta)
+        ct = tf.cos(theta)
+        data_in = tf.concat([last_state[:,3:], ct, st], axis = -1)
+
+        fc1 = self.process_fc1(data_in)
         fcadd1 = self.process_fc_add1(fc1)
         fc2 = self.process_fc2(fcadd1)
-        # fc2 = tf.nn.dropout(fc2, rate=self.rate)
         fcadd2 = self.process_fc_add2(fc2)
-        # fcadd2 = tf.nn.dropout(fcadd2, rate=self.rate)
         update = self.process_fc3(fcadd2)
 
         new_state = last_state + update
