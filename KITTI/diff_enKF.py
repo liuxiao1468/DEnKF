@@ -350,10 +350,9 @@ class BayesianImageSensorModel(tf.keras.Model):
 
 class ObservationNoise(tf.keras.Model):
     '''
-    Noise model is asuming the noise to be heteroscedastic
-    The noise is not constant at each step
+    observation noise model is used for estimating the aleatoric noise.
     inputs: an intermediate representation of the raw observation
-    denoted as encoding 
+    denoted as encoding.
     R = [batch_size, dim_z, dim_z]
     The fc neural network is designed for learning the diag(R)
     i.e., 
@@ -362,11 +361,10 @@ class ObservationNoise(tf.keras.Model):
     2 + (64 -> fc 2 -> 2) + fixed noise,
     the result is the diag of R where R is a 2x2 matrix
     '''
-    def __init__(self, batch_size, num_ensemble, dim_z, r_diag, jacobian):
+    def __init__(self, batch_size, num_ensemble, dim_z, r_diag):
         super(ObservationNoise, self).__init__()
         self.batch_size = batch_size
         self.num_ensemble = num_ensemble
-        self.jacobian = jacobian
         self.dim_z = dim_z
         self.r_diag = r_diag
 
@@ -401,7 +399,7 @@ class ObservationNoise(tf.keras.Model):
             regularizer = tf.keras.regularizers.l2(l=1e-3),
             initializer = tf.constant_initializer(init))
 
-    def call(self, inputs, training, learn):
+    def call(self, inputs, learn):
         if learn == True:
             diag = self.observation_noise_fc1(inputs)
             diag = self.observation_noise_fc2(diag)
