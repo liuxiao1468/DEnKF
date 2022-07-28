@@ -43,16 +43,22 @@ The filter is suppose to learn the process noise model Q, observation noise mode
 and the observation model h(.)
 Author: Xiao Liu -> I have made decent amount of changes to the original codebase.
 '''
-class transform:
-    def __init__(self):
-        super(transform, self).__init__()
-        parameters = pickle.load(open('parameters.pkl', 'rb'))
-        self.v_m = parameters['v_m']
-        self.v_std = parameters['v_std']
-        self.theta_m = parameters['theta_m']
-        self.theta_std = parameters['theta_std']
-        self.theta_dot_m = parameters['theta_dot_m']
-        self.theta_dot_std = parameters['theta_dot_std']
+# class transform:
+#     def __init__(self):
+#         super(transform, self).__init__()
+#         parameters = pickle.load(open('parameters.pkl', 'rb'))
+#         self.x_m = parameters['x_m']
+#         self.x_std = parameters['x_std']
+#         self.y_m = parameters['y_m']
+#         self.y_std = parameters['y_std']
+#         self.v_m = parameters['v_m']
+#         self.v_std = parameters['v_std']
+#         self.theta_m = parameters['theta_m']
+#         self.theta_std = parameters['theta_std']
+#         self.theta_dot_m = parameters['theta_dot_m']
+#         self.theta_dot_std = parameters['theta_dot_std']
+#     def transform(self, state):
+
 
 
 class ProcessModel(tf.keras.Model):
@@ -256,7 +262,7 @@ class BayesianImageSensorModel(tf.keras.Model):
         self.sensor_conv1 = tf.keras.layers.Conv2D(
             filters=64,
             kernel_size=7,
-            strides=[2, 2],
+            strides=[1, 1],
             activation=tf.nn.relu,
             kernel_initializer=tf.initializers.glorot_normal(),
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
@@ -265,7 +271,7 @@ class BayesianImageSensorModel(tf.keras.Model):
 
         self.sensor_conv2 = tf.keras.layers.Conv2D(
             filters=32, kernel_size=5,
-            strides=[2, 2],
+            strides=[1, 2],
             activation=tf.nn.relu,
             kernel_initializer=tf.initializers.glorot_normal(),
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
@@ -274,7 +280,7 @@ class BayesianImageSensorModel(tf.keras.Model):
 
         self.sensor_conv3 = tf.keras.layers.Conv2D(
             filters=32, kernel_size=5,
-            strides=[2, 2],
+            strides=[1, 2],
             activation=tf.nn.relu,
             kernel_initializer=tf.initializers.glorot_normal(),
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
@@ -283,7 +289,7 @@ class BayesianImageSensorModel(tf.keras.Model):
 
         self.sensor_conv4 = tf.keras.layers.Conv2D(
             filters=32, kernel_size=5,
-            strides=[1, 1],
+            strides=[2, 2],
             activation=tf.nn.relu,
             kernel_initializer=tf.initializers.glorot_normal(),
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
@@ -312,12 +318,14 @@ class BayesianImageSensorModel(tf.keras.Model):
 
     def call(self, image):
         conv1 = self.sensor_conv1(image)
-        conv1 = tf.nn.max_pool2d(conv1, 2, 2, padding='SAME')
+        # conv1 = tf.nn.max_pool2d(conv1, 2, 2, padding='SAME')
         conv2 = self.sensor_conv2(conv1)
-        conv2 = tf.nn.max_pool2d(conv2, 2, 2, padding='SAME')
+        # conv2 = tf.nn.max_pool2d(conv2, 2, 2, padding='SAME')
         conv3 = self.sensor_conv3(conv2)
-        conv3 = tf.nn.max_pool2d(conv3, 2, 2, padding='SAME')
+        # conv3 = tf.nn.max_pool2d(conv3, 2, 2, padding='SAME')
         conv4 = self.sensor_conv4(conv3)
+
+        conv4 = tf.nn.dropout(conv4, rate=0.3)
 
         inputs = self.flatten(conv4)
         num_feature = inputs.shape[1]
@@ -337,7 +345,7 @@ class BayesianImageSensorModel(tf.keras.Model):
         fc2 = self.bayes_sensor_fc2(fc1)
         fc3 = self.bayes_sensor_fc3(fc2)
         observation = self.bayes_sensor_fc4(fc3)
-        encoding = fcadd2
+        encoding = fc3
 
         observation = tf.reshape(observation, [self.batch_size, self.num_ensemble, self.dim_z])
         observation_m = tf.reduce_mean(observation, axis = 1)
@@ -564,7 +572,7 @@ class utils:
     ###########################################################################
 
 class bayesiantransition(tf.keras.Model):
-    def __init__(self, batch_size, num_ensemble, dropout_rate,**kwargs):
+    def __init__(self, batch_size, num_ensemble,**kwargs):
 
         super(bayesiantransition, self).__init__(**kwargs)
 
@@ -572,14 +580,10 @@ class bayesiantransition(tf.keras.Model):
         self.batch_size = batch_size
         self.num_ensemble = num_ensemble
         
-        self.dim_x = 2
-
-        self.jacobian = True
-
-        self.dropout_rate = dropout_rate
+        self.dim_x = 5
 
         # learned process model
-        self.bayesian_model = BayesianProcessModel(self.batch_size, self.num_ensemble, self.dim_x, self.jacobian, self.dropout_rate)
+        self.bayesian_model = BayesianProcessModel(self.batch_size, self.num_ensemble, self.dim_x)
 
     def call(self, input_states):
 
@@ -606,7 +610,7 @@ class bayesiantransition(tf.keras.Model):
         return output
 
 class StandaloneModel(tf.keras.Model):
-    def __init__(self, batch_size, num_ensemble, dropout_rate,**kwargs):
+    def __init__(self, batch_size, num_ensemble, **kwargs):
 
         super(StandaloneModel, self).__init__(**kwargs)
 
@@ -614,15 +618,11 @@ class StandaloneModel(tf.keras.Model):
         self.batch_size = batch_size
         self.num_ensemble = num_ensemble
         
-        self.dim_x = 2
+        self.dim_x = 5
         self.dim_z = 2
 
-        self.jacobian = True
-
-        self.dropout_rate = dropout_rate
-
         # learned sensor model
-        self.sensor_model = BayesianSensorModelBranching(self.batch_size, self.num_ensemble, self.dim_z)
+        self.sensor_model = BayesianImageSensorModel(self.batch_size, self.num_ensemble, self.dim_z)
 
     def call(self, inputs):
 
@@ -642,42 +642,38 @@ class StandaloneModel(tf.keras.Model):
         return output
 
 
-
 # Xiao's version
 class enKFMLP(tf.keras.Model):
-    def __init__(self, batch_size, num_ensemble, dropout_rate,**kwargs):
+    def __init__(self, batch_size, num_ensemble, **kwargs):
         super(enKFMLP, self).__init__()
 
         # initialization
         self.batch_size = batch_size
         self.num_ensemble = num_ensemble
         
-        self.dim_x = 2
+        self.dim_x = 5
         self.dim_z = 2
-
-        self.jacobian = True
 
         self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.1
         self.r_diag = self.r_diag.astype(np.float32)
 
-        self.dropout_rate = dropout_rate
-
-        self.bayesian_process_model = BayesianProcessModel(self.batch_size, self.num_ensemble, self.dim_x, self.jacobian, self.dropout_rate)
+        # learned process model
+        self.bayesian_process_model = BayesianProcessModel(self.batch_size, self.num_ensemble, self.dim_x)
 
         # learned observation model
-        self.observation_model = ObservationModel(self.batch_size, self.num_ensemble, self.dim_x, self.dim_z, self.jacobian)
+        self.observation_model = ObservationModel(self.batch_size, self.num_ensemble, self.dim_x, self.dim_z)
 
         # learned observation noise
-        self.observation_noise_model = ObservationNoise(self.batch_size, self.num_ensemble, self.dim_z, self.r_diag, self.jacobian)
+        self.observation_noise_model = ObservationNoise(self.batch_size, self.num_ensemble, self.dim_z, self.r_diag)
 
         # learned sensor model
-        self.sensor_model = BayesianSensorModelBranching(self.batch_size, self.num_ensemble, self.dim_z)
+        self.sensor_model = BayesianImageSensorModel(self.batch_size, self.num_ensemble, self.dim_z)
 
         self.utils_ = utils()
 
     def call(self, inputs, states):
         # decompose inputs and states
-        raw_sensor1, raw_sensor2 = inputs
+        raw_sensor = inputs
 
         state_old, m_state = states
 
@@ -687,14 +683,12 @@ class enKFMLP(tf.keras.Model):
 
 
         # get prediction and noise of next state
-        training = True
-        state_pred = self.bayesian_process_model(state_old, training)
+        state_pred = self.bayesian_process_model(state_old)
 
 
         # update step
         # get predicted observations
-        learn = True
-        H_X = self.observation_model(state_pred, training, learn)
+        H_X = self.observation_model(state_pred)
 
         # get the emsemble mean of the observations
         m = tf.reduce_mean(H_X, axis = 1)
@@ -712,10 +706,10 @@ class enKFMLP(tf.keras.Model):
         final_H_X = tf.transpose(H_X, perm=[0,2,1])
 
         # get sensor reading
-        ensemble_z, z, encoding = self.sensor_model(raw_sensor1, raw_sensor2, training, learn = True)
+        ensemble_z, z, encoding = self.sensor_model(raw_sensor)
 
         # get observation noise
-        R, diag_R = self.observation_noise_model(encoding, training, True)
+        R, diag_R = self.observation_noise_model(encoding, learn = True)
 
 
         # the measurement y

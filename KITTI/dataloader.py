@@ -16,11 +16,14 @@ import re
 
 class DataLoader:
     def __init__(self):
-        self.dataset_path = '/Users/xiao.lu/project/KITTI_dataset/' 
+        # self.dataset_path = '/Users/xiao.lu/project/KITTI_dataset/' 
+        self.dataset_path = 'dataset/' 
 
     def preprocessing(self, data):
-        img_2 = cv2.imread(self.dataset_path+data[3][1])
-        img_1 = cv2.imread(self.dataset_path+data[3][0])
+        # img_2 = cv2.imread(self.dataset_path+data[3][1])
+        # img_1 = cv2.imread(self.dataset_path+data[3][0])
+        img_2 = cv2.imread(data[3][1])
+        img_1 = cv2.imread(data[3][0])
         img_2 = cv2.resize(img_2, (150, 50), interpolation=cv2.INTER_LINEAR)
         img_1 = cv2.resize(img_1, (150, 50), interpolation=cv2.INTER_LINEAR)
         img_2_ = img_2.astype(np.float32)/255.

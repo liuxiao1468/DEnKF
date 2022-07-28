@@ -23,7 +23,7 @@ define the training loop
 def run_filter(mode):
 
     tf.keras.backend.clear_session()
-    dim_x = 2
+    dim_x = 5
     if mode == True:
         # define batch_size
         batch_size = 32
@@ -31,12 +31,8 @@ def run_filter(mode):
         # define number of ensemble
         num_ensemble = 32
 
-        # define dropout rate
-        dropout_rate = 0.1
-
         # load the model
-        model = diff_enKF.enKFMLP(batch_size, num_ensemble, dropout_rate)
-
+        model = diff_enKF.enKFMLP(batch_size, num_ensemble)
         optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
 
         epoch = 100
@@ -44,13 +40,9 @@ def run_filter(mode):
             print('end-to-end wholemodel')
             print("========================================= working on epoch %d =========================================: " % (k))
             # 
-            steps = int(10000/batch_size)
-            path_1 = './dataset/track_dataset_01.pkl'
-            path_2 = './dataset/track_dataset_02.pkl'
-            path_3 = './dataset/track_dataset_03.pkl'
+            steps = int(21590/batch_size)
             for step in range(steps):
-                gt_pre, gt_now, raw_sensor_1, raw_sensor_2 = DataLoader.load_training_data(path_1, path_2, path_3, batch_size, name[index])
-                raw_sensor = (raw_sensor_1, raw_sensor_2)
+                gt_pre, gt_now, obs, raw_sensor = DataLoader.load_training_data(batch_size)
                 with tf.GradientTape(persistent=True) as tape:
                     start = time.time()
                     states = DataLoader.format_state(gt_pre, batch_size, num_ensemble, dim_x)
@@ -59,19 +51,19 @@ def run_filter(mode):
                     state_p = out[2]
                     y = out[3]
                     m = out[5]
-                    loss_1 = get_loss._mse(gt_now - state_p)
-                    loss_2 = get_loss._mse(gt_now - y)
-                    loss_3 = get_loss._mse(gt_now - m)
-                    loss = get_loss._mse(gt_now - state_h)
+                    loss_1 = get_loss._mse(gt_now - state_p) # state transition
+                    loss_2 = get_loss._mse(obs - y) # sensor model
+                    loss_3 = get_loss._mse(obs - m) # observation model
+                    loss = get_loss._mse(gt_now - state_h) # end-to-end state
                     end = time.time()
-                    if step %50 ==0:
+                    if step % 100 ==0:
                         print("Training loss at step %d: %.4f (took %.3f seconds) " %
                               (step, float(loss), float(end-start)))
-                        print(state_p[0])
-                        print(m[0])
+                        print(loss_1)
+                        print(loss_2)
+                        print(loss_3)
                         print(y[0])
-                        print(state_h[0])
-                        print(gt_now[0])
+                        print(obs[0])
                         print('---')
                 grads = tape.gradient(loss, model.trainable_weights)
                 optimizer.apply_gradients(zip(grads, model.trainable_weights))
@@ -88,7 +80,7 @@ def run_filter(mode):
             if (k+1) % epoch == 0:
                 model.save_weights('./models/DEnKF_'+version+'_'+name[index]+str(epoch).zfill(3)+'.h5')
                 print('model is saved at this epoch')
-            if (k+1) % 20 ==0:
+            if (k+1) % 10 ==0:
                 model.save_weights('./models/DEnKF_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
                 print('model is saved at this epoch')
 
@@ -97,17 +89,12 @@ def run_filter(mode):
 
                 test_num_ensemble = 32
 
-                test_dropout_rate = 0.1
-
                 # load the model
-                model_test = diff_enKF.enKFMLP(test_batch_size, test_num_ensemble, test_dropout_rate)
-
-                path_2 = './dataset/track_dataset_02.pkl'
-
-                test_gt_pre, test_gt_now, test_raw_sensor_1, test_raw_sensor_2 = DataLoader.load_testing_data(path_2, tracker_id[index])
+                model_test = diff_enKF.enKFMLP(test_batch_size, test_num_ensemble)
+                test_gt_pre, test_gt_now, test_obs, test_raw_sensor = DataLoader.load_testing_data()
 
                 # load init state
-                inputs = (test_raw_sensor_1[0], test_raw_sensor_2[0])
+                inputs = test_raw_sensor[0]
                 init_states = DataLoader.format_init_state(test_gt_pre[0], test_batch_size, test_num_ensemble, dim_x)
 
                 dummy = model_test(inputs, init_states)
@@ -129,9 +116,9 @@ def run_filter(mode):
                 for t in range (test_gt_now.shape[0]):
                     if t == 0:
                         states = init_states
-                    test_raw_sensor = (test_raw_sensor_1[t], test_raw_sensor_2[t])
-                    out = model_test(test_raw_sensor, states)
-                    if t%3 == 0:
+                    raw_sensor = test_raw_sensor[t]
+                    out = model_test(raw_sensor, states)
+                    if t%10 == 0:
                         print('---')
                         print(out[1])
                         print(test_gt_now[t])
@@ -278,27 +265,14 @@ get_loss = diff_enKF.getloss()
 load data for training
 '''
 global name 
-# name = ['local_track']
-name = ['checkstand', 'checkstandleft', 'coolerleft', 'entranceleft', 'sideright', 'smoothiebar']
+name = ['KITTI']
 
-global tracker_id
-# tracker_id = ['checkstand-6', 'checkstandleft-6', 'coolerleft-4', 'entranceleft-3', 'sideright-3', 'smoothiebar-3']
-tracker_id = ['checkstand-9', 'checkstandleft-7', 'coolerleft-7', 'entranceleft-12', 'sideright-13', 'smoothiebar-6']
 global index
-index = 1
+index = 0
 
 global version
 version = 'v1.0'
 old_version = version
-
-
-# path = './dataset/track_dataset.pkl'
-# states_pre_save, states_gt_save, observation_save_1, observation_save_2 = DataLoader.load_training_data(path, 64)
-# print(states_pre_save.shape)
-# print('---')
-# print(states_gt_save.shape)
-# print('---')
-# print(observation_save_1.shape)
 
 def main():
 
