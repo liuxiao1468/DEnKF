@@ -90,12 +90,13 @@ class ProcessModel(tf.keras.Model):
     def call(self, last_state):
         last_state = tf.reshape(last_state, [self.batch_size * self.num_particles, self.dim_x])
 
-        # we pass the action into the process model with the cosine and sine
-        theta = tf.reshape(last_state[:,2], [self.batch_size * self.num_particles, 1])
-        theta = -(theta-np.pi/2)
-        st = tf.sin(theta)
-        ct = tf.cos(theta)
-        data_in = tf.concat([last_state[:,3:], ct, st], axis = -1)
+        # # we pass the action into the process model with the cosine and sine
+        # theta = tf.reshape(last_state[:,2], [self.batch_size * self.num_particles, 1])
+        # theta = -(theta-np.pi/2)
+        # st = tf.sin(theta)
+        # ct = tf.cos(theta)
+        # data_in = tf.concat([last_state[:,3:], ct, st], axis = -1)
+        data_in = last_state[:, 3:]
 
         fc1 = self.process_fc1(data_in)
         fcadd1 = self.process_fc_add1(fc1)
@@ -107,6 +108,85 @@ class ProcessModel(tf.keras.Model):
         new_state = tf.reshape(new_state, [self.batch_size, self.num_particles, self.dim_x])
 
         return new_state
+
+class ProcessNoise(tf.keras.Model):
+    '''
+    Process noise model is used to learn the epistemic uncertainty of the process model,
+    it models the diag(Q) of the covariance Q, Q varied at every timestep given different state.
+    Q = [batch_size, dim_x, dim_x]
+    i.e., 
+    if the state has 6 inputs
+    state vector 6 -> fc 32 -> fc 64 -> 6
+    the result is the diag of Q where Q is a 6x6 matrix
+    '''
+    def __init__(self, batch_size, num_ensemble, dim_x, q_diag):
+        super(ProcessNoise, self).__init__()
+        self.batch_size = batch_size
+        self.num_ensemble = num_ensemble
+        self.dim_x = dim_x
+        self.q_diag = q_diag
+
+    def build(self, input_shape):
+        constant = np.ones(self.dim_x)* 1e-3
+        init = np.sqrt(np.square(self.q_diag) - constant)
+        self.fixed_process_noise_bias = self.add_weight(
+            name = 'fixed_process_noise_bias',
+            shape = [self.dim_x],
+            regularizer = tf.keras.regularizers.l2(l=1e-3),
+            initializer = tf.constant_initializer(constant))
+        self.process_noise_fc1 = tf.keras.layers.Dense(
+            units=32,
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='process_noise_fc1')
+        self.process_noise_fc_add1 = tf.keras.layers.Dense(
+            units=64,
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='process_noise_fc_add1')
+        self.process_noise_fc2 = tf.keras.layers.Dense(
+            units=64,
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='process_noise_fc2')
+        self.process_noise_fc3 = tf.keras.layers.Dense(
+            units=self.dim_x,
+            activation=None,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='process_noise_fc3')
+        self.learned_process_noise_bias = self.add_weight(
+            name = 'learned_process_noise_bias',
+            shape = [self.dim_x],
+            regularizer = tf.keras.regularizers.l2(l=1e-3),
+            initializer = tf.constant_initializer(init))
+
+    def call(self, state, learn):
+        if learn == True:
+            fc1 = self.process_noise_fc1(state)
+            fcadd1 = self.process_noise_fc_add1(fc1)
+            fc2 = self.process_noise_fc2(fcadd1)
+            diag = self.process_noise_fc3(fc2)
+            diag = tf.square(diag + self.learned_process_noise_bias)
+        else:
+            diag = tf.square(self.learned_process_noise_bias)
+            diag = tf.stack([diag] * (self.batch_size))
+
+        diag = diag + self.fixed_process_noise_bias
+        mean = np.zeros((self.dim_x))
+        mean = tf.convert_to_tensor(mean, dtype=tf.float32)
+        mean = tf.stack([mean] * self.batch_size)
+        nd = tfp.distributions.MultivariateNormalDiag(loc=mean, scale_diag=diag)
+        Q = tf.reshape(nd.sample(self.num_ensemble), [self.batch_size, self.num_ensemble, self.dim_x])
+
+        return Q, diag
 
 class ImageSensorModel(tf.keras.Model):
     '''
@@ -243,7 +323,7 @@ class Likelihood(tf.keras.Model):
 
     def call(self, inputs):
         # unpack the inputs
-        particles, encoding = inputs
+        encoding = inputs
 
         # expand the encoding into particles
         for n in range (self.batch_size):
@@ -259,6 +339,11 @@ class Likelihood(tf.keras.Model):
         like = self._fc_layer_3(like)
 
         like = tf.reshape(like, [self.batch_size, self.num_particles])
+
+        w = tf.reduce_sum(like, axis=1)
+        w = tf.stack([w]*self.num_particles)
+        w = tf.transpose(w, perm=[1,0])
+        like = like/w
         return like
 
 class Particle_filter(tf.keras.Model):
@@ -269,7 +354,7 @@ class Particle_filter(tf.keras.Model):
         self.batch_size = batch_size
         self.num_particles = num_particles
         
-        self.dim_x = 5
+        self.dim_x = 2
         self.dim_z = 2
 
         # learned process model
@@ -324,7 +409,10 @@ class Particle_filter(tf.keras.Model):
                 tmp = tf.reshape(tf.gather(particles[i], idx[i]), [1, self.num_particles, self.dim_x])
                 new_particle = tf.concat([new_particle, tmp], 0)
 
+        # use the new weights to calculate state
         weights = tf.expand_dims(weights,1)
+
+        # get the final state - weighted sum of all particles
         m_state = tf.matmul(weights, new_particle)
         
         return new_particle, weights, m_state
