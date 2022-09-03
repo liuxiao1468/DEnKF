@@ -14,7 +14,7 @@ import csv
 import cv2
 
 import diff_enKF
-from dataloader import DataLoader
+from dataloader_v2 import DataLoader
 DataLoader = DataLoader()
 
 '''
@@ -23,29 +23,32 @@ define the training loop
 def run_filter(mode):
 
     tf.keras.backend.clear_session()
-    dim_x = 2
+    dim_x = 5
     if mode == True:
         # define batch_size
-        batch_size = 128
+        batch_size = 16
 
         # define number of ensemble
         num_ensemble = 32
 
         # load the model
-        model = diff_enKF.enKFMLPFIXH(batch_size, num_ensemble)
+        model = diff_enKF.enKFMLP(batch_size, num_ensemble)
         optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
 
-        # load weights from a trained model
-        old_model = diff_enKF.enKFMLP(batch_size, num_ensemble)
-        gt_pre, gt_now, obs, raw_sensor = DataLoader.load_training_data(batch_size)
-        dummy_state = DataLoader.format_state(gt_pre, batch_size, num_ensemble, dim_x)
-        _ = old_model(raw_sensor, dummy_state)
-        _ = model(raw_sensor,dummy_state)
+        optimizer_sensor = tf.keras.optimizers.Adam(learning_rate=1e-6)
 
-        old_model.load_weights('./models/DEnKF_v2.8_KITTI219.h5')
-        model.layers[2].set_weights(old_model.layers[3].get_weights())
+        # load a trained model
+        sensor_model = diff_enKF.StandaloneModel(batch_size, num_ensemble)
+        gt_pre, gt_now, obs, raw_sensor, d_state = DataLoader.load_training_data(batch_size, add_noise=False, norm=True)
+        init_states = DataLoader.format_state(gt_pre, batch_size, num_ensemble, dim_x)
+        _ = model(raw_sensor,init_states)
+        _ = sensor_model(raw_sensor)
+        sensor_model.load_weights('./models/DEnKF_vS.06_sensor034.h5')
+        model.layers[3].set_weights(sensor_model.layers[0].get_weights())
+        model.layers[3].trainable = False
 
-        epoch = 100
+
+        epoch = 50
         counter = 0
         for k in range (epoch):
             print('end-to-end wholemodel')
@@ -54,16 +57,16 @@ def run_filter(mode):
             steps = int(21590/batch_size)
             for step in range(steps):
                 counter = counter + 1
-                gt_pre, gt_now, obs, raw_sensor = DataLoader.load_training_data(batch_size)
+                gt_pre, gt_now, obs, raw_sensor, d_state = DataLoader.load_training_data(batch_size, add_noise=False, norm=True)
                 with tf.GradientTape(persistent=True) as tape:
                     start = time.time()
                     states = DataLoader.format_state(gt_pre, batch_size, num_ensemble, dim_x)
                     out = model(raw_sensor,states)
                     state_h = out[1]
-                    state_p = out[2]
+                    state_d = out[-1]
                     y = out[3]
                     m = out[5]
-                    loss_1 = get_loss._mse(gt_now - state_p) # state transition
+                    loss_1 = get_loss._mse(d_state - state_d) # state transition
                     loss_2 = get_loss._mse(obs - y) # sensor model
                     loss_3 = get_loss._mse(obs - m) # observation model
                     loss = get_loss._mse(gt_now - state_h) # end-to-end state
@@ -74,8 +77,6 @@ def run_filter(mode):
                         print(loss_1)
                         print(loss_2)
                         print(loss_3)
-                        print(y[0])
-                        print(obs[0])
                         with train_summary_writer.as_default():
                             tf.summary.scalar('sensor_loss', loss_2, step=counter)
                             tf.summary.scalar('total_loss', loss, step=counter)
@@ -88,16 +89,16 @@ def run_filter(mode):
                 grads = tape.gradient(loss_1, model.layers[0].trainable_weights)
                 optimizer.apply_gradients(zip(grads, model.layers[0].trainable_weights))
 
-                grads = tape.gradient(loss_2, model.layers[2].trainable_weights)
-                optimizer.apply_gradients(zip(grads, model.layers[2].trainable_weights))
+                # grads = tape.gradient(loss_2, model.layers[3].trainable_weights)
+                # optimizer_sensor.apply_gradients(zip(grads, model.layers[3].trainable_weights))
 
-                # grads = tape.gradient(loss_3, model.layers[1].trainable_weights)
-                # optimizer.apply_gradients(zip(grads, model.layers[1].trainable_weights))
+                grads = tape.gradient(loss_3, model.layers[1].trainable_weights)
+                optimizer.apply_gradients(zip(grads, model.layers[1].trainable_weights))
 
             if (k+1) % epoch == 0:
                 model.save_weights('./models/DEnKF_'+version+'_'+name[index]+str(epoch).zfill(3)+'.h5')
                 print('model is saved at this epoch')
-            if (k+1) % 20 ==0:
+            if (k+1) % 2 ==0:
                 model.save_weights('./models/DEnKF_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
                 print('model is saved at this epoch')
 
@@ -107,12 +108,15 @@ def run_filter(mode):
                 test_num_ensemble = 32
 
                 # load the model
-                model_test = diff_enKF.enKFMLPFIXH(test_batch_size, test_num_ensemble)
-                test_gt_pre, test_gt_now, test_obs, test_raw_sensor = DataLoader.load_testing_data()
+                model_test = diff_enKF.enKFMLP(test_batch_size, test_num_ensemble)
+                test_gt_pre, test_gt_now, test_obs, test_raw_sensor, _ = DataLoader.load_testing_data_onebyone(0, add_noise=False, norm=True)
+
+                dataset = pickle.load(open('KITTI_VO_test.pkl', 'rb'))
+                N = len(dataset)
 
                 # load init state
-                inputs = test_raw_sensor[0]
-                init_states = DataLoader.format_init_state(test_gt_pre[0], test_batch_size, test_num_ensemble, dim_x)
+                inputs = test_raw_sensor
+                init_states = DataLoader.format_init_state(test_gt_pre, test_batch_size, test_num_ensemble, dim_x)
 
                 dummy = model_test(inputs, init_states)
                 model_test.load_weights('./models/DEnKF_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
@@ -130,18 +134,19 @@ def run_filter(mode):
                 transition_save = []
                 observation_save = []
 
-                for t in range (test_gt_now.shape[0]):
+                for t in range (N):
                     if t == 0:
                         states = init_states
-                    raw_sensor = test_raw_sensor[t]
+                    test_gt_pre, test_gt_now, test_obs, test_raw_sensor, _ = DataLoader.load_testing_data_onebyone(t, add_noise=False, norm=True)
+                    raw_sensor = test_raw_sensor
                     out = model_test(raw_sensor, states)
                     if t%10 == 0:
                         print('---')
                         print(out[1])
-                        print(test_gt_now[t])
+                        print(test_gt_now)
                     states = (out[0], out[1])
                     state_out = np.array(out[1])
-                    gt_out = np.array(test_gt_now[t])
+                    gt_out = np.array(test_gt_now)
                     ensemble = np.array(tf.reshape(out[0], [test_num_ensemble, dim_x]))
                     transition_out = np.array(out[2])
                     observation_out = np.array(out[3])
@@ -279,12 +284,12 @@ global index
 index = 0
 
 global version
-version = 'v3.6'
+version = 'v5.03'
 old_version = version
 
-os.system('rm -rf /tf/experiments/loss/v3.6')
+os.system('rm -rf /tf/experiments/loss/v5.03')
 
-train_log_dir = "/tf/experiments/loss/v3.6"
+train_log_dir = "/tf/experiments/loss/v5.03"
 train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 
 def main():

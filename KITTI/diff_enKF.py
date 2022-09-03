@@ -32,6 +32,7 @@ import pdb
 from tensorflow.compat.v1 import ConfigProto
 from tensorflow.compat.v1 import InteractiveSession
 import tensorflow_probability as tfp
+from dataloader_v2 import transform
 
 config = ConfigProto()
 config.gpu_options.allow_growth = True
@@ -43,107 +44,6 @@ The filter is suppose to learn the process noise model Q, observation noise mode
 and the observation model h(.)
 Author: Xiao Liu -> I have made decent amount of changes to the original codebase.
 '''
-class state_transform:
-    def __init__(self):
-        super(state_transform, self).__init__()
-        parameters = pickle.load(open('parameters.pkl', 'rb'))
-        self.x_m = parameters['x_m']
-        self.x_std = parameters['x_std']
-        self.y_m = parameters['y_m']
-        self.y_std = parameters['y_std']
-        self.v_m = parameters['v_m']
-        self.v_std = parameters['v_std']
-        self.theta_m = parameters['theta_m']
-        self.theta_std = parameters['theta_std']
-        self.theta_dot_m = parameters['theta_dot_m']
-        self.theta_dot_std = parameters['theta_dot_std']
-
-    def for_transform(self, state):
-        '''
-        state -> [batch_size, num_ensemble, dim_x]
-        '''
-        batch_size = state.shape[0]
-        num_ensemble = state.shape[1]
-        dim_x = state.shape[2]
-
-        state = tf.reshape(state, [batch_size * num_ensemble, dim_x])
-        x = state[:,0]
-        y = state[:,1]
-        theta = state[:,2]
-        v = state[:,3]
-        theta_dot = state[:,4]
-
-        x = (x - self.x_m)/self.x_std
-        y = (y - self.y_m)/self.y_std
-        theta = (theta - self.theta_m)/self.theta_std
-        v = (v - self.v_m)/self.v_std
-        theta_dot = (theta_dot - self.theta_dot_m)/self.theta_dot_std
-
-        state = tf.concat([x, y, theta, v, theta_dot], axis = -1)
-        state = tf.reshape(state, [batch_size, num_ensemble, dim_x])
-        return state
-
-    def inv_transform(self, state):
-        '''
-        state -> [batch_size, num_ensemble, dim_x]
-        '''
-        batch_size = state.shape[0]
-        num_ensemble = state.shape[1]
-        dim_x = state.shape[2]
-
-        state = tf.reshape(state, [batch_size * num_ensemble, dim_x])
-        x = state[:,0]
-        y = state[:,1]
-        theta = state[:,2]
-        v = state[:,3]
-        theta_dot = state[:,4]
-
-        x = x * self.x_std + self.x_m
-        y = y * self.y_std + self.y_m
-        theta = theta * self.theta_std + self.theta_m
-        v = v * self.v_std + self.v_m
-        theta_dot = theta_dot * self.theta_dot_std + self.theta_dot_m
-
-        state = tf.concat([x, y, theta, v, theta_dot], axis = -1)
-        state = tf.reshape(state, [batch_size, num_ensemble, dim_x])
-        return state
-
-    def observation_transform(self, observation):
-        '''
-        observation -> [batch_size, num_ensemble, dim_z]
-        '''
-        batch_size = observation.shape[0]
-        num_ensemble = observation.shape[1]
-        dim_z = observation.shape[2]
-
-        observation = tf.reshape(observation, [batch_size * num_ensemble, dim_z])
-        v = observation[:,0]
-        theta_dot = observation[:,1]
-        v = (v - self.v_m)/self.v_std
-        theta_dot = (theta_dot - self.theta_dot_m)/self.theta_dot_std
-
-        observation = tf.concat([v, theta_dot], axis = -1)
-        observation = tf.reshape(observation, [batch_size, num_ensemble, dim_z])
-        return observation
-
-    def inv_observation_transform(self, observation):
-        '''
-        observation -> [batch_size, num_ensemble, dim_z]
-        '''
-        batch_size = observation.shape[0]
-        num_ensemble = observation.shape[1]
-        dim_z = observation.shape[2]
-
-        observation = tf.reshape(observation, [batch_size * num_ensemble, dim_z])
-        v = observation[:,0]
-        theta_dot = observation[:,1]
-        v = v * self.v_std + self.v_m
-        theta_dot = theta_dot * self.theta_dot_std + self.theta_dot_m
-
-        observation = tf.concat([v, theta_dot], axis = -1)
-        observation = tf.reshape(observation, [batch_size, num_ensemble, dim_z])
-        return observation
-
 
 class ProcessModel(tf.keras.Model):
     '''
@@ -310,16 +210,12 @@ class BayesianProcessModelfull(tf.keras.Model):
             name='process_fc3')
 
     def call(self, last_state):
-        # last_state = self.state_transform_.inv_transform(last_state)
-
         last_state = tf.reshape(last_state, [self.batch_size * self.num_ensemble, self.dim_x])
-
-
         # we pass the action into the process model with the cosine and sine
-        # theta = tf.reshape(last_state[:,2], [self.batch_size * self.num_ensemble, 1])
-        # st = tf.sin(theta)
-        # ct = tf.cos(theta)
-        # data_in = tf.concat([last_state[:,2:], st, ct], axis = -1)
+        theta = tf.reshape(last_state[:,2], [self.batch_size * self.num_ensemble, 1])
+        st = tf.sin(theta)
+        ct = tf.cos(theta)
+        data_in = tf.concat([last_state[:,2:], st, ct], axis = -1)
 
         data_in = last_state
 
@@ -332,7 +228,6 @@ class BayesianProcessModelfull(tf.keras.Model):
         new_state = last_state + update
         new_state = tf.reshape(new_state, [self.batch_size, self.num_ensemble, self.dim_x])
 
-        # new_state = self.state_transform_.for_transform(new_state)
         return new_state
 
 class KnownProcessModel(tf.keras.Model):
@@ -347,7 +242,6 @@ class KnownProcessModel(tf.keras.Model):
         self.batch_size = batch_size
         self.num_ensemble = num_ensemble
         self.dim_x = dim_x
-        # self.state_transform_ = state_transform()
 
     def build(self, input_shape):
         self.process_fc1 = tfp.layers.DenseFlipout(
@@ -372,7 +266,6 @@ class KnownProcessModel(tf.keras.Model):
             name='process_fc3')
 
     def call(self, last_state):
-        # last_state = self.state_transform_.inv_transform(last_state)
 
         last_state = tf.reshape(last_state, [self.batch_size * self.num_ensemble, self.dim_x])
         # we pass the action into the process model with the cosine and sine
@@ -400,7 +293,6 @@ class KnownProcessModel(tf.keras.Model):
         new_state = tf.concat([x, y, theta, data_out], axis = -1)
         new_state = tf.reshape(new_state, [self.batch_size, self.num_ensemble, self.dim_x])
 
-        # new_state = self.state_transform_.for_transform(new_state)
         return new_state
 
 class ObservationModel(tf.keras.Model):
@@ -417,51 +309,49 @@ class ObservationModel(tf.keras.Model):
 
     def build(self, input_shape):
         self.observation_fc1 = tf.keras.layers.Dense(
-            units=32,
+            units=64,
             activation=tf.nn.relu,
             kernel_initializer=tf.initializers.glorot_normal(),
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
             bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
             name='observation_fc1')
-        self.observation_fc_add1 = tf.keras.layers.Dense(
-            units=64,
-            activation=tf.nn.relu,
-            kernel_initializer=tf.initializers.glorot_normal(),
-            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
-            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
-            name='observation_fc_add1')
         self.observation_fc2 = tf.keras.layers.Dense(
-            units=64,
+            units=128,
             activation=tf.nn.relu,
             kernel_initializer=tf.initializers.glorot_normal(),
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
             bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
             name='observation_fc2')
-        self.observation_fc_add2 = tf.keras.layers.Dense(
-            units=32,
+        self.observation_fc3 = tf.keras.layers.Dense(
+            units=128,
             activation=tf.nn.relu,
             kernel_initializer=tf.initializers.glorot_normal(),
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
             bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
-            name='observation_fc_add2')
-        self.observation_fc3 = tf.keras.layers.Dense(
+            name='observation_fc3')
+        self.observation_fc4 = tf.keras.layers.Dense(
+            units=64,
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='observation_fc4')
+        self.observation_fc5 = tf.keras.layers.Dense(
             units=self.dim_z,
             activation=None,
             kernel_initializer=tf.initializers.glorot_normal(),
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
             bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
-            name='observation_fc3')
+            name='observation_fc5')
 
     def call(self, state):
         state = tf.reshape(state, [self.batch_size* self.num_ensemble, self.dim_x])
-
         fc1 = self.observation_fc1(state)
-        fcadd1 = self.observation_fc_add1(fc1)
-        fc2 = self.observation_fc2(fcadd1)
-        fcadd2 = self.observation_fc_add2(fc2)
-        z_pred = self.observation_fc3(fcadd2)
+        fc2 = self.observation_fc2(fc1)
+        fc3 = self.observation_fc3(fc2)
+        fc4 = self.observation_fc4(fc3)
+        z_pred = self.observation_fc5(fc4)
         z_pred = tf.reshape(z_pred, [self.batch_size, self.num_ensemble, self.dim_z])
-
         return z_pred
 
 
@@ -480,9 +370,9 @@ class BayesianImageSensorModel(tf.keras.Model):
 
     def build(self, input_shape):
         self.sensor_conv1 = tf.keras.layers.Conv2D(
-            filters=128,
+            filters=64,
             kernel_size=7,
-            strides=[1, 1],
+            strides=[2, 2],
             activation=tf.nn.relu,
             kernel_initializer=tf.initializers.glorot_normal(),
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
@@ -490,8 +380,8 @@ class BayesianImageSensorModel(tf.keras.Model):
             name='sensor_conv1')
 
         self.sensor_conv2 = tf.keras.layers.Conv2D(
-            filters=64, kernel_size=5,
-            strides=[1, 2],
+            filters=128, kernel_size=5,
+            strides=[2, 2],
             activation=tf.nn.relu,
             kernel_initializer=tf.initializers.glorot_normal(),
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
@@ -499,8 +389,8 @@ class BayesianImageSensorModel(tf.keras.Model):
             name='sensor_conv2')
 
         self.sensor_conv3 = tf.keras.layers.Conv2D(
-            filters=32, kernel_size=3,
-            strides=[1, 2],
+            filters=256, kernel_size=5,
+            strides=[2, 2],
             activation=tf.nn.relu,
             kernel_initializer=tf.initializers.glorot_normal(),
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
@@ -508,69 +398,91 @@ class BayesianImageSensorModel(tf.keras.Model):
             name='sensor_conv3')
 
         self.sensor_conv4 = tf.keras.layers.Conv2D(
-            filters=32, kernel_size=3,
-            strides=[1, 1],
+            filters=256, kernel_size=5,
+            strides=[2, 2],
             activation=tf.nn.relu,
             kernel_initializer=tf.initializers.glorot_normal(),
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
             bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
             name='sensor_conv4')
 
+        self.sensor_conv5 = tf.keras.layers.Conv2D(
+            filters=512, kernel_size=3,
+            strides=[2, 2],
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_conv5')
+
         self.flatten = tf.keras.layers.Flatten()
 
         # bayesian neural networks
-        self.bayes_sensor_fc1 = tfp.layers.DenseFlipout(
+        self.sensor_fc1 = tf.keras.layers.Dense(
+            units=1024,
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_fc1')
+        self.sensor_fc2 = tf.keras.layers.Dense(
+            units=512,
+            activation=tf.nn.relu,
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_fc2')
+        self.sensor_fc3 = tf.keras.layers.Dense(
             units=128,
             activation=tf.nn.relu,
-            name='bayes_sensor_fc1')
-        self.bayes_sensor_fc2 = tfp.layers.DenseFlipout(
-            units=64,
-            activation=tf.nn.relu,
-            name='bayes_sensor_fc2')
-        self.bayes_sensor_fc3 = tfp.layers.DenseFlipout(
-            units=32,
-            activation=tf.nn.relu,
-            name='bayes_sensor_fc3')
-        self.bayes_sensor_fc4 = tfp.layers.DenseFlipout(
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_fc3')
+        self.sensor_fc4 = tf.keras.layers.Dense(
             units=self.dim_z,
             activation=None,
-            name='bayes_sensor_fc4')
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_fc4')
 
     def call(self, image):
         conv1 = self.sensor_conv1(image)
-        conv1 = tf.nn.max_pool2d(conv1, 2, 2, padding='SAME')
+        # conv1 = tf.nn.max_pool2d(conv1, 2, 2, padding='SAME')
+        conv1 = tf.keras.layers.BatchNormalization(axis = -1)(conv1)
+
         conv2 = self.sensor_conv2(conv1)
-        conv2 = tf.nn.max_pool2d(conv2, 2, 2, padding='SAME')
+        # conv2 = tf.nn.max_pool2d(conv2, 2, 2, padding='SAME')
+        conv2 = tf.keras.layers.BatchNormalization(axis = -1)(conv2)
+
         conv3 = self.sensor_conv3(conv2)
-        conv3 = tf.nn.max_pool2d(conv3, 2, 2, padding='SAME')
+        # conv3 = tf.nn.max_pool2d(conv3, 2, 2, padding='SAME')
+        conv3 = tf.keras.layers.BatchNormalization(axis = -1)(conv3)
+
         conv4 = self.sensor_conv4(conv3)
+        conv4 = tf.keras.layers.BatchNormalization(axis = -1)(conv4)
 
-        conv4 = tf.nn.dropout(conv4, rate=0.3)
+        conv5 = self.sensor_conv5(conv4)
+        conv5 = tf.keras.layers.BatchNormalization(axis = -1)(conv5)
+        conv5 = tf.nn.dropout(conv5, rate=0.3)
 
-        inputs = self.flatten(conv4)
-        num_feature = inputs.shape[1]
-
-        # expand to ensembles
-        for i in range (self.batch_size):
-            if i == 0:
-                inputs_z = tf.reshape(tf.stack([inputs[i]] * self.num_ensemble), [1, self.num_ensemble, num_feature])
-            else:
-                tmp = tf.reshape(tf.stack([inputs[i]] * self.num_ensemble), [1, self.num_ensemble, num_feature])
-                inputs_z = tf.concat([inputs_z, tmp], 0)
-
-        # make sure the ensemble shape matches
-        inputs_z = tf.reshape(inputs_z, [self.batch_size * self.num_ensemble, num_feature])
-
-        fc1 = self.bayes_sensor_fc1(inputs_z)
-        fc2 = self.bayes_sensor_fc2(fc1)
-        fc3 = self.bayes_sensor_fc3(fc2)
-        observation = self.bayes_sensor_fc4(fc3)
+        print(conv1.shape)
+        print(conv2.shape)
+        print(conv3.shape)
+        print(conv4.shape)
+        print(conv5.shape)
+        inputs = self.flatten(conv5)
+        fc1 = self.sensor_fc1(inputs)
+        fc2 = self.sensor_fc2(fc1)
+        fc3 = self.sensor_fc3(fc2)
+        observation = self.sensor_fc4(fc3)
         encoding = fc3
-
-        observation = tf.reshape(observation, [self.batch_size, self.num_ensemble, self.dim_z])
+        # observation = tf.reshape(observation, [self.batch_size, self.num_ensemble, self.dim_z])
+        observation = tf.reshape(observation, [self.batch_size, 1, self.dim_z])
         observation_m = tf.reduce_mean(observation, axis = 1)
 
-        encoding = tf.reshape(encoding, [self.batch_size, self.num_ensemble, 32])
+        encoding = tf.reshape(encoding, [self.batch_size, 1, 128])
         encoding = tf.reduce_mean(encoding, axis = 1)
 
         return observation, observation_m, encoding
@@ -647,15 +559,29 @@ class BayesianImageSensorModelonly(tf.keras.Model):
 
         self.flatten = tf.keras.layers.Flatten()
 
-        # bayesian neural networks
-        self.bayes_sensor_fc1 = tfp.layers.DenseFlipout(
+        self.sensor_fc1 = tf.keras.layers.Dense(
             units=1024,
             activation=tf.nn.relu,
-            name='bayes_sensor_fc1')
-        self.bayes_sensor_fc2 = tfp.layers.DenseFlipout(
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_fc1')
+        self.sensor_fc2 = tf.keras.layers.Dense(
             units=512,
             activation=tf.nn.relu,
-            name='bayes_sensor_fc2')
+            kernel_initializer=tf.initializers.glorot_normal(),
+            kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
+            name='sensor_fc2')
+        # # bayesian neural networks
+        # self.bayes_sensor_fc1 = tfp.layers.DenseFlipout(
+        #     units=1024,
+        #     activation=tf.nn.relu,
+        #     name='bayes_sensor_fc1')
+        # self.bayes_sensor_fc2 = tfp.layers.DenseFlipout(
+        #     units=512,
+        #     activation=tf.nn.relu,
+        #     name='bayes_sensor_fc2')
         self.bayes_sensor_fc3 = tfp.layers.DenseFlipout(
             units=256,
             activation=tf.nn.relu,
@@ -672,7 +598,6 @@ class BayesianImageSensorModelonly(tf.keras.Model):
     def call(self, image):
         conv1 = self.sensor_conv1(image)
         conv1 = tf.keras.layers.BatchNormalization(axis = -1)(conv1)
-
 
         conv2 = self.sensor_conv2(conv1)
         conv2 = tf.keras.layers.BatchNormalization(axis = -1)(conv2)
@@ -711,8 +636,8 @@ class BayesianImageSensorModelonly(tf.keras.Model):
         # make sure the ensemble shape matches
         inputs_z = tf.reshape(inputs_z, [self.batch_size * self.num_ensemble, num_feature])
 
-        fc1 = self.bayes_sensor_fc1(inputs_z)
-        fc2 = self.bayes_sensor_fc2(fc1)
+        fc1 = self.sensor_fc1(inputs_z)
+        fc2 = self.sensor_fc2(fc1)
         fc3 = self.bayes_sensor_fc3(fc2)
         fc4 = self.bayes_sensor_fc4(fc3)
         observation = self.bayes_sensor_fc5(fc4)
@@ -755,15 +680,13 @@ class ObservationNoise(tf.keras.Model):
             shape = [self.dim_z],
             regularizer = tf.keras.regularizers.l2(l=1e-3),
             initializer = tf.constant_initializer(constant))
-
         self.observation_noise_fc1 = tf.keras.layers.Dense(
-            units=16,
+            units=32,
             activation=tf.nn.relu,
             kernel_initializer=tf.initializers.glorot_normal(),
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
             bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
             name='observation_noise_fc1')
-
         self.observation_noise_fc2 = tf.keras.layers.Dense(
             units=self.dim_z,
             activation=None,
@@ -771,23 +694,18 @@ class ObservationNoise(tf.keras.Model):
             kernel_regularizer=tf.keras.regularizers.l2(l=1e-3),
             bias_regularizer=tf.keras.regularizers.l2(l=1e-3),
             name='observation_noise_fc2')
-
         self.learned_observation_noise_bias = self.add_weight(
             name = 'learned_observation_noise_bias',
             shape = [self.dim_z],
             regularizer = tf.keras.regularizers.l2(l=1e-3),
             initializer = tf.constant_initializer(init))
 
-    def call(self, inputs, learn):
-        if learn == True:
-            diag = self.observation_noise_fc1(inputs)
-            diag = self.observation_noise_fc2(diag)
-            diag = tf.square(diag + self.learned_observation_noise_bias)
-        else:
-            diag = tf.square(self.learned_observation_noise_bias)
-            diag = tf.stack([diag] * (self.batch_size))
-
+    def call(self, inputs):
+        diag = self.observation_noise_fc1(inputs)
+        diag = self.observation_noise_fc2(diag)
+        diag = tf.square(diag + self.learned_observation_noise_bias)
         diag = diag + self.fixed_observation_noise_bias
+
         R = tf.linalg.diag(diag)
         R = tf.reshape(R, [self.batch_size, self.dim_z, self.dim_z])
         diag = tf.reshape(diag, [self.batch_size, self.dim_z])
@@ -993,7 +911,8 @@ class StandaloneModel(tf.keras.Model):
         self.dim_z = 2
 
         # learned sensor model
-        self.sensor_model = BayesianImageSensorModelonly(self.batch_size, self.num_ensemble, self.dim_z)
+        # self.sensor_model = BayesianImageSensorModelonly(self.batch_size, self.num_ensemble, self.dim_z)
+        self.sensor_model = BayesianImageSensorModel(self.batch_size, self.num_ensemble, self.dim_z)
 
     def call(self, inputs):
 
@@ -1005,7 +924,8 @@ class StandaloneModel(tf.keras.Model):
 
         z = tf.reshape(z, [self.batch_size, 1, self.dim_z])
 
-        ensemble_z = tf.reshape(ensemble_z, [self.batch_size, self.num_ensemble, self.dim_z])
+        # ensemble_z = tf.reshape(ensemble_z, [self.batch_size, self.num_ensemble, self.dim_z])
+        ensemble_z = z
 
         # tuple structure of updated state
         output = (ensemble_z, z)
@@ -1022,7 +942,7 @@ class enKFMLP(tf.keras.Model):
         self.batch_size = batch_size
         self.num_ensemble = num_ensemble
         
-        self.dim_x = 2
+        self.dim_x = 5
         self.dim_z = 2
 
         self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.1
@@ -1043,6 +963,8 @@ class enKFMLP(tf.keras.Model):
 
         self.utils_ = utils()
 
+        self.transform_ = transform()
+
     def call(self, inputs, states):
         # decompose inputs and states
         raw_sensor = inputs
@@ -1055,8 +977,13 @@ class enKFMLP(tf.keras.Model):
 
 
         # get prediction and noise of next state
-        state_pred = self.bayesian_process_model(state_old)
-
+        in_state = self.transform_.state_inv_transform(state_old)
+        state_p = self.bayesian_process_model(in_state)
+        state_p = self.transform_.state_transform(state_p)
+        update = state_p - state_old
+        d_state = tf.reduce_mean(update, axis = 1)
+        d_state = tf.reshape(d_state, [self.batch_size, 1, self.dim_x])
+        state_pred = state_p
 
         # update step
         # get predicted observations
@@ -1079,11 +1006,24 @@ class enKFMLP(tf.keras.Model):
         final_H_A = tf.transpose(H_A, perm=[0,2,1])
         final_H_X = tf.transpose(H_X, perm=[0,2,1])
 
+        # # get sensor reading
+        # ensemble_z, z, encoding = self.sensor_model(raw_sensor)
+
         # get sensor reading
-        ensemble_z, z, encoding = self.sensor_model(raw_sensor)
+        _, z, encoding = self.sensor_model(raw_sensor)
+
+        # expand z to ensembles
+        for i in range (self.batch_size):
+            if i == 0:
+                ensemble_z = tf.reshape(tf.stack([z[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_z])
+            else:
+                tmp = tf.reshape(tf.stack([z[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_z])
+                ensemble_z = tf.concat([ensemble_z, tmp], 0)
+        # make sure the ensemble shape matches
+        ensemble_z = tf.reshape(ensemble_z, [self.batch_size, self.num_ensemble, self.dim_z])
 
         # get observation noise
-        R, diag_R = self.observation_noise_model(encoding, learn = True)
+        R, diag_R = self.observation_noise_model(encoding)
 
 
         # the measurement y
@@ -1133,7 +1073,7 @@ class enKFMLP(tf.keras.Model):
         m = tf.reshape(m, [self.batch_size, 1, self.dim_z])
 
         # tuple structure of updated state
-        output = (state_new, m_state_new, m_state_pred, z, ensemble_z, m)
+        output = (state_new, m_state_new, m_state_pred, z, ensemble_z, m, d_state)
 
         return output
 
@@ -1150,7 +1090,6 @@ class enKFMLP_v2(tf.keras.Model):
         self.dim_z = 2
 
         self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.1
-        # self.r_diag = np.array([1, 0.01]).astype(np.float32)
         self.r_diag = self.r_diag.astype(np.float32)
 
         # learned process model
@@ -1167,6 +1106,8 @@ class enKFMLP_v2(tf.keras.Model):
 
         self.utils_ = utils()
 
+        self.transform_ = transform()
+
     def call(self, inputs, states):
         # decompose inputs and states
         raw_sensor = inputs
@@ -1177,16 +1118,18 @@ class enKFMLP_v2(tf.keras.Model):
 
         m_state = tf.reshape(m_state, [self.batch_size, self.dim_x])
 
-
         # get prediction and noise of next state
-        state_pred = self.bayesian_process_model(state_old)
-
+        in_state = self.transform_.state_inv_transform(state_old)
+        state_p = self.bayesian_process_model(in_state)
+        state_p = self.transform_.state_transform(state_p)
+        update = state_p - state_old
+        d_state = tf.reduce_mean(update, axis = 1)
+        d_state = tf.reshape(d_state, [self.batch_size, 1, self.dim_x])
+        state_pred = state_p
 
         # update step
         # get predicted observations
         H_X = self.observation_model(state_pred)
-
-        # H_X = state_pred[:,:,3:]
 
         # get the emsemble mean of the observations
         m = tf.reduce_mean(H_X, axis = 1)
@@ -1204,10 +1147,21 @@ class enKFMLP_v2(tf.keras.Model):
         final_H_X = tf.transpose(H_X, perm=[0,2,1])
 
         # get sensor reading
-        ensemble_z, z, encoding = self.sensor_model(raw_sensor)
+        _, z, encoding = self.sensor_model(raw_sensor)
+
+        # expand z to ensembles
+        for i in range (self.batch_size):
+            if i == 0:
+                ensemble_z = tf.reshape(tf.stack([z[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_z])
+            else:
+                tmp = tf.reshape(tf.stack([z[i]] * self.num_ensemble), [1, self.num_ensemble, self.dim_z])
+                ensemble_z = tf.concat([ensemble_z, tmp], 0)
+        # make sure the ensemble shape matches
+        ensemble_z = tf.reshape(ensemble_z, [self.batch_size, self.num_ensemble, self.dim_z])
+
 
         # get observation noise
-        R, diag_R = self.observation_noise_model(encoding, learn = True)
+        R, diag_R = self.observation_noise_model(encoding)
 
 
         # the measurement y
@@ -1257,7 +1211,7 @@ class enKFMLP_v2(tf.keras.Model):
         m = tf.reshape(m, [self.batch_size, 1, self.dim_z])
 
         # tuple structure of updated state
-        output = (state_new, m_state_new, m_state_pred, z, ensemble_z, m)
+        output = (state_new, m_state_new, m_state_pred, z, ensemble_z, m, d_state)
 
         return output
 

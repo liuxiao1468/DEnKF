@@ -14,7 +14,7 @@ import csv
 import cv2
 
 import diff_enKF
-from dataloader import DataLoader
+from dataloader_v2 import DataLoader
 DataLoader = DataLoader()
 
 '''
@@ -26,14 +26,14 @@ def run_filter(mode):
     dim_x = 2
     if mode == True:
         # define batch_size
-        batch_size = 8
+        batch_size = 2
 
         # define number of ensemble
         num_ensemble = 32
 
         # load the model
         model = diff_enKF.StandaloneModel(batch_size, num_ensemble)
-        optimizer = tf.keras.optimizers.Adam(learning_rate=1e-5)
+        optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
 
         # # load weights from a trained model
         # gt_pre, gt_now, obs, raw_sensor = DataLoader.load_training_data(batch_size,add_noise=False)
@@ -49,22 +49,22 @@ def run_filter(mode):
             steps = int(21590/batch_size)
             for step in range(steps):
                 counter = counter + 1
-                gt_pre, gt_now, obs, raw_sensor = DataLoader.load_training_data(batch_size, add_noise=False)
+                gt_pre, gt_now, obs, raw_sensor, d_state = DataLoader.load_training_data(batch_size, add_noise=False, norm=True)
                 with tf.GradientTape(persistent=True) as tape:
                     start = time.time()
                     out = model(raw_sensor)
                     y = out[1]
                     loss_1 = get_loss._mse(obs[:,:,0] - y[:,:,0])
                     loss_2 = get_loss._mse(obs[:,:,1] - y[:,:,1])
-                    loss = 0.7 * loss_1 + 0.3 * loss_2 # sensor model
+                    loss = 0.6 * loss_1 + 0.4 * loss_2 # sensor model
                     end = time.time()
-                    if step % 50 ==0:
+                    if step % 2 ==0:
                         print("Training loss at step %d: %.4f (took %.3f seconds) " %
                               (step, float(loss), float(end-start)))
-                        with train_summary_writer.as_default():
-                            tf.summary.scalar('sensor_loss', loss, step=counter)
-                            tf.summary.scalar('sensor_loss1', loss_1, step=counter)
-                            tf.summary.scalar('sensor_loss2', loss_2, step=counter)
+                        # with train_summary_writer.as_default():
+                        #     tf.summary.scalar('sensor_loss', loss, step=counter)
+                        #     tf.summary.scalar('sensor_loss1', loss_1, step=counter)
+                        #     tf.summary.scalar('sensor_loss2', loss_2, step=counter)
                         print(loss_1)
                         print(loss_2)
                         print('---')
@@ -74,7 +74,7 @@ def run_filter(mode):
             if (k+1) % epoch == 0:
                 model.save_weights('./models/DEnKF_'+version+'_'+name[index]+str(epoch).zfill(3)+'.h5')
                 print('model is saved at this epoch')
-            if (k+1) % 20 ==0:
+            if (k+1) % 5 ==0:
                 model.save_weights('./models/DEnKF_'+version+'_'+name[index]+str(k).zfill(3)+'.h5')
                 print('model is saved at this epoch')
 
@@ -85,7 +85,7 @@ def run_filter(mode):
 
                 # load the model
                 model_test = diff_enKF.StandaloneModel(test_batch_size, test_num_ensemble)
-                test_gt_pre, test_gt_now, test_obs, test_raw_sensor = DataLoader.load_testing_data_onebyone(0, add_noise=False)
+                test_gt_pre, test_gt_now, test_obs, test_raw_sensor, _ = DataLoader.load_testing_data_onebyone(0, add_noise=False, norm=True)
 
                 # load init state
                 inputs = test_raw_sensor
@@ -96,7 +96,7 @@ def run_filter(mode):
                     layer.trainable = False
                 model_test.summary()
 
-                dataset = pickle.load(open('KITTI_VO_test_v2.pkl', 'rb'))
+                dataset = pickle.load(open('KITTI_VO_test.pkl', 'rb'))
                 N = len(dataset)
 
                 '''
@@ -107,7 +107,7 @@ def run_filter(mode):
                 gt_observation = []
 
                 for t in range (N):
-                    test_gt_pre, test_gt_now, test_obs, test_raw_sensor = DataLoader.load_testing_data_onebyone(t, add_noise=False)
+                    test_gt_pre, test_gt_now, test_obs, test_raw_sensor, _ = DataLoader.load_testing_data_onebyone(t, add_noise=False, norm=True)
                     raw_sensor = test_raw_sensor
                     out = model_test(raw_sensor)
                     if t%10 == 0:
@@ -130,7 +130,7 @@ def run_filter(mode):
                     pickle.dump(data, f)
 
     else:
-        k_list = [79]
+        k_list = [99]
         for k in k_list:
             # define batch_size
             test_batch_size = 1
@@ -198,13 +198,13 @@ global index
 index = 1
 
 global version
-version = 'vS.01'
-old_version = version
+version = 'vS.08'
+# old_version = version
 
-os.system('rm -rf /tf/experiments/loss/vS.01')
+# os.system('rm -rf /tf/experiments/loss/vS.08')
 
-train_log_dir = "/tf/experiments/loss/vS.01"
-train_summary_writer = tf.summary.create_file_writer(train_log_dir)
+# train_log_dir = "/tf/experiments/loss/vS.08"
+# train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 
 def main():
     training = True

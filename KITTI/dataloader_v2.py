@@ -99,8 +99,8 @@ class transform:
 
 class DataLoader:
     def __init__(self):
-        # self.dataset_path = '/Users/xiao.lu/project/KITTI_dataset/' 
-        self.dataset_path = 'dataset/' 
+        self.dataset_path = '/Users/xiao.lu/project/KITTI_dataset/' 
+        # self.dataset_path = 'dataset/' 
         self.transform_ = transform()
 
     def img_augmentation(self, img):
@@ -123,17 +123,17 @@ class DataLoader:
         return img
 
     def preprocessing(self, data, train_mode):
-        # img_2 = cv2.imread(self.dataset_path+data[3][1])
-        # img_1 = cv2.imread(self.dataset_path+data[3][0])
-        img_2 = cv2.imread(data[3][1])
-        img_1 = cv2.imread(data[3][0])
+        img_2 = cv2.imread(self.dataset_path+data[3][1])
+        img_1 = cv2.imread(self.dataset_path+data[3][0])
+        # img_2 = cv2.imread(data[3][1])
+        # img_1 = cv2.imread(data[3][0])
         if train_mode == True:
-            img_2 = self.img_augmentation(img_2)
-            img_1 = self.img_augmentation(img_1)
+            img_2 = cv2.flip(img_2, 1)
+            img_1 = cv2.flip(img_1, 1)
         # 150, 50
         # 640, 192
-        img_2 = cv2.resize(img_2, (150, 50), interpolation=cv2.INTER_LINEAR)
-        img_1 = cv2.resize(img_1, (150, 50), interpolation=cv2.INTER_LINEAR)
+        img_2 = cv2.resize(img_2, (640, 192), interpolation=cv2.INTER_LINEAR)
+        img_1 = cv2.resize(img_1, (640, 192), interpolation=cv2.INTER_LINEAR)
         img_2_ = img_2.astype(np.float32)/255.
         img_1_ = img_1.astype(np.float32)/255.
         ###########
@@ -148,8 +148,20 @@ class DataLoader:
         v = observation[0]+ random.uniform(-0.1, 0.1)
         theta_dot = observation[1]+ random.uniform(-0.001, 0.001)
         return [v, theta_dot]
+    
+    def state_augment(self, pre_state, gt_state):
+        batch_size = pre_state.shape[0]
+        num_ensemble = pre_state.shape[1]
+        dim_x = pre_state.shape[2]
+        value = random.uniform(-4, 4)
+        add_value = np.array([value, value, 0, 0, 0])
+        add = tf.reshape(tf.stack([add_value] * batch_size), [batch_size, 1, dim_x])
+        add = tf.cast(add, tf.float32)
+        pre_state = pre_state + add
+        gt_state = gt_state + add
+        return pre_state, gt_state
 
-    def load_training_data(self, batch_size, add_noise):
+    def load_training_data(self, batch_size, add_noise, norm):
         dim_x = 5
         dim_z = 2
         dataset = pickle.load(open('KITTI_VO_dataset.pkl', 'rb'))
@@ -160,15 +172,27 @@ class DataLoader:
         observation_img = []
         d_state = []
         for idx in select:
-            states_gt_save.append(dataset[idx][1])
-            states_pre_save.append(dataset[idx][0])
-            if add_noise == True:
-                observation_save.append(self.add_small_noise(dataset[idx][2]))
+            img_augment = random.uniform(0, 1)
+            if img_augment > 0.5:
+                states_gt_save.append(dataset[idx][1])
+                states_pre_save.append(dataset[idx][0])
+                if add_noise == True:
+                    observation_save.append(self.add_small_noise(dataset[idx][2]))
+                else:
+                    observation_save.append(dataset[idx][2])
+                img = self.preprocessing(dataset[idx], False)
+                observation_img.append(img)
+                d_state.append(dataset[idx][4])
             else:
-                observation_save.append(dataset[idx][2])
-            img = self.preprocessing(dataset[idx], False)
-            observation_img.append(img)
-            d_state.append(dataset[idx][4])
+                states_gt_save.append(dataset[idx][1])
+                states_pre_save.append(dataset[idx][0])
+                obs = dataset[idx][2]
+                obs[1] = -obs[1]
+                observation_save.append(obs)
+                img = self.preprocessing(dataset[idx], True)
+                observation_img.append(img)
+                d_state.append(dataset[idx][4])
+
         states_pre_save = np.array(states_pre_save)
         states_gt_save = np.array(states_gt_save)
         observation_save = np.array(observation_save)
@@ -182,17 +206,18 @@ class DataLoader:
         observation_save = tf.convert_to_tensor(observation_save, dtype=tf.float32)
         observation_save = tf.reshape(observation_save, [batch_size, 1, dim_z])
         observation_img = tf.convert_to_tensor(observation_img, dtype=tf.float32)
-        d_state = tf.convert_to_tensor(d_state, dtype=tf.float32)
-        d_state = tf.reshape(d_state, [batch_size, 1, dim_x])
-        states_pre_save = self.transform_.state_transform(states_pre_save)
-        states_gt_save = self.transform_.state_transform(states_gt_save)
-        observation_save = self.transform_.obs_transform(observation_save)
-        d_state = self.transform_.d_state_transform(d_state)
+        if norm == True:
+            states_pre_save = self.transform_.state_transform(states_pre_save)
+            states_gt_save = self.transform_.state_transform(states_gt_save)
+            observation_save = self.transform_.obs_transform(observation_save)
+            # d_state = self.transform_.d_state_transform(d_state)
+        states_pre_save, states_gt_save = self.state_augment(states_pre_save, states_gt_save)
+        d_state = states_gt_save - states_pre_save
 
         return states_pre_save, states_gt_save, observation_save, observation_img, d_state
 
 
-    def load_testing_data(self, add_noise):
+    def load_testing_data(self, add_noise, norm):
         dim_x = 5
         dim_z = 2
         dataset = pickle.load(open('KITTI_VO_test.pkl', 'rb'))
@@ -216,30 +241,32 @@ class DataLoader:
         states_gt_save = np.array(states_gt_save)
         observation_save = np.array(observation_save)
         observation_img = np.array(observation_img)
-        d_state = np.array(d_state)
+        # d_state = np.array(d_state)
         # to tensor
         states_pre_save = tf.convert_to_tensor(states_pre_save, dtype=tf.float32)
         states_pre_save = tf.reshape(states_pre_save, [N, 1, dim_x])
-        states_pre_save = self.transform_.state_transform(states_pre_save)
-        states_pre_save = tf.reshape(states_pre_save, [N, 1, 1, dim_x])
         states_gt_save = tf.convert_to_tensor(states_gt_save, dtype=tf.float32)
         states_gt_save = tf.reshape(states_gt_save, [N, 1, dim_x])
-        states_gt_save = self.transform_.state_transform(states_gt_save)
-        states_gt_save = tf.reshape(states_gt_save, [N, 1, 1, dim_x])
         observation_save = tf.convert_to_tensor(observation_save, dtype=tf.float32)
         observation_save = tf.reshape(observation_save, [N, 1, dim_z])
-        observation_save = self.transform_.obs_transform(observation_save)
-        observation_save = tf.reshape(observation_save, [N, 1, 1, dim_z])
         observation_img = tf.convert_to_tensor(observation_img, dtype=tf.float32)
         observation_img = tf.expand_dims(observation_img, axis=1)
-        d_state = tf.convert_to_tensor(d_state, dtype=tf.float32)
-        d_state = tf.reshape(d_state, [N, 1, dim_x])
-        d_state = self.transform_.d_state_transform(d_state)
+        # d_state = tf.convert_to_tensor(d_state, dtype=tf.float32)
+        # d_state = tf.reshape(d_state, [N, 1, dim_x])
+        if norm == True:
+            states_pre_save = self.transform_.state_transform(states_pre_save)
+            states_gt_save = self.transform_.state_transform(states_gt_save)
+            observation_save = self.transform_.obs_transform(observation_save)
+            # d_state = self.transform_.d_state_transform(d_state)
+        d_state = states_gt_save - states_pre_save
+        states_pre_save = tf.reshape(states_pre_save, [N, 1, 1, dim_x])
+        states_gt_save = tf.reshape(states_gt_save, [N, 1, 1, dim_x])
+        observation_save = tf.reshape(observation_save, [N, 1, 1, dim_z])
         d_state = tf.reshape(d_state, [N, 1, 1, dim_x])
 
         return states_pre_save, states_gt_save, observation_save, observation_img, d_state
 
-    def load_testing_data_onebyone(self, idx, add_noise):
+    def load_testing_data_onebyone(self, idx, add_noise, norm):
         dim_x = 5
         dim_z = 2
         dataset = pickle.load(open('KITTI_VO_test.pkl', 'rb'))
@@ -258,35 +285,33 @@ class DataLoader:
             observation_save.append(dataset[idx][2])
         img = self.preprocessing(dataset[idx], False)
         observation_img.append(img)
-
         states_pre_save = np.array(states_pre_save)
         states_gt_save = np.array(states_gt_save)
         observation_save = np.array(observation_save)
         observation_img = np.array(observation_img)
-
         # to tensor
         states_pre_save = tf.convert_to_tensor(states_pre_save, dtype=tf.float32)
         states_pre_save = tf.reshape(states_pre_save, [N, 1, dim_x])
-        states_pre_save = self.transform_.for_transform(states_pre_save)
-
-
         states_gt_save = tf.convert_to_tensor(states_gt_save, dtype=tf.float32)
         states_gt_save = tf.reshape(states_gt_save, [N, 1, dim_x])
-        states_gt_save = self.transform_.for_transform(states_gt_save)
-
         observation_save = tf.convert_to_tensor(observation_save, dtype=tf.float32)
         observation_save = tf.reshape(observation_save, [N, 1, dim_z])
-        observation_save = self.transform_.for_transform(observation_save)
-
+        observation_img = tf.convert_to_tensor(observation_img, dtype=tf.float32)
+        observation_img = tf.expand_dims(observation_img, axis=1)
+        if norm == True:
+            states_pre_save = self.transform_.state_transform(states_pre_save)
+            states_gt_save = self.transform_.state_transform(states_gt_save)
+            observation_save = self.transform_.obs_transform(observation_save)
+        d_state = states_gt_save - states_pre_save
         observation_img = tf.convert_to_tensor(observation_img, dtype=tf.float32)
 
-        return states_pre_save, states_gt_save, observation_save, observation_img
+        return states_pre_save, states_gt_save, observation_save, observation_img, d_state
 
 
     def format_state(self, state, batch_size, num_ensemble, dim_x):
         dim_x = 5
         diag = np.ones((dim_x)).astype(np.float32) * 0.5
-        # diag = np.array([10, 10, 0.1, 0.5, 0.001]).astype(np.float32)
+        # diag = np.array([1, 1, 0.5, 0.5, 0.005]).astype(np.float32)
         diag = diag.astype(np.float32)
         mean = np.zeros((dim_x))
         mean = tf.convert_to_tensor(mean, dtype=tf.float32)
@@ -305,7 +330,7 @@ class DataLoader:
 
     def format_init_state(self, state, batch_size, num_ensemble, dim_x):
         dim_x = 5
-        diag = np.ones((dim_x)).astype(np.float32) * 0.1
+        diag = np.ones((dim_x)).astype(np.float32) * 0.01
         # diag = np.array([1, 1, 0.1, 0.1, 0.001]).astype(np.float32)
         diag = diag.astype(np.float32)
         mean = np.zeros((dim_x))
@@ -347,7 +372,7 @@ class DataLoader:
 # DataLoader_func = DataLoader()
 # add_noise = True
 # states_pre_save, states_gt_save, observation_save, observation_img, d_state = DataLoader_func.load_training_data(
-#     8, add_noise)
+#     8, add_noise, norm=True)
 # print(states_pre_save[0])
 # print('---')
 # print(states_gt_save[0])
@@ -364,10 +389,10 @@ class DataLoader:
 # # state = DataLoader_func.format_state(states_gt_save, 8, 32, 5)
 # # print(state[0][1][0])
 
-# states_pre_save, states_gt_save, observation_save, observation_img, d_state = DataLoader_func.load_testing_data(add_noise)
+# states_pre_save, states_gt_save, observation_save, observation_img, d_state = DataLoader_func.load_testing_data_onebyone(10, add_noise=False, norm=True)
 # print(states_pre_save.shape)
 # print('---')
-# print(states_gt_save[300])
+# print(states_gt_save)
 # print('---')
 # print(observation_save.shape)
 # print('---')
