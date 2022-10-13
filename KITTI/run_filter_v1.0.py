@@ -26,7 +26,7 @@ def run_filter(mode):
     dim_x = 2
     if mode == True:
         # define batch_size
-        batch_size = 2
+        batch_size = 16
 
         # define number of ensemble
         num_ensemble = 32
@@ -58,13 +58,13 @@ def run_filter(mode):
                     loss_2 = get_loss._mse(obs[:,:,1] - y[:,:,1])
                     loss = 0.6 * loss_1 + 0.4 * loss_2 # sensor model
                     end = time.time()
-                    if step % 2 ==0:
+                    if step % 50 ==0:
                         print("Training loss at step %d: %.4f (took %.3f seconds) " %
                               (step, float(loss), float(end-start)))
-                        # with train_summary_writer.as_default():
-                        #     tf.summary.scalar('sensor_loss', loss, step=counter)
-                        #     tf.summary.scalar('sensor_loss1', loss_1, step=counter)
-                        #     tf.summary.scalar('sensor_loss2', loss_2, step=counter)
+                        with train_summary_writer.as_default():
+                            tf.summary.scalar('sensor_loss', loss, step=counter)
+                            tf.summary.scalar('sensor_loss1', loss_1, step=counter)
+                            tf.summary.scalar('sensor_loss2', loss_2, step=counter)
                         print(loss_1)
                         print(loss_2)
                         print('---')
@@ -150,7 +150,7 @@ def run_filter(mode):
                 layer.trainable = False
             model_test.summary()
 
-            dataset = pickle.load(open('KITTI_VO_test_01_v2.pkl', 'rb'))
+            dataset = pickle.load(open('KITTI_VO_test.pkl', 'rb'))
             N = len(dataset)
 
             '''
@@ -180,7 +180,7 @@ def run_filter(mode):
             data['observation'] = observation_save
             data['gt_observation'] = gt_observation
 
-            with open('./output/DEnKF_'+version+'_'+ name[index]+str(k).zfill(3)+'test.pkl', 'wb') as f:
+            with open('./output/DEnKF_'+version+'_'+ name[index]+str(k).zfill(3)+'test'+str(j)+'.pkl', 'wb') as f:
                 pickle.dump(data, f)
         
 '''
@@ -199,12 +199,12 @@ index = 1
 
 global version
 version = 'vS.08'
-# old_version = version
+old_version = version
 
-# os.system('rm -rf /tf/experiments/loss/vS.08')
+os.system('rm -rf /tf/experiments/loss/vS.08')
 
-# train_log_dir = "/tf/experiments/loss/vS.08"
-# train_summary_writer = tf.summary.create_file_writer(train_log_dir)
+train_log_dir = "/tf/experiments/loss/vS.08"
+train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 
 def main():
     training = True

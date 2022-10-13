@@ -96,10 +96,8 @@ class DataLoader:
         if train_mode == True:
             img_2 = self.img_augmentation(img_2)
             img_1 = self.img_augmentation(img_1)
-
         # 150, 50
         # 640, 192
-
         img_2 = cv2.resize(img_2, (640, 192), interpolation=cv2.INTER_LINEAR)
         img_1 = cv2.resize(img_1, (640, 192), interpolation=cv2.INTER_LINEAR)
         img_2_ = img_2.astype(np.float32)/255.
