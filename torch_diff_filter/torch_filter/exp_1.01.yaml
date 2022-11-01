@@ -21,7 +21,7 @@ train:
     weight_decay: 1e-2
     adam_eps: 1e-3
     log_freq: 100
-    eval_freq: 500
+    eval_freq: 10000
     log_directory: './experiments'
     loss: 'mse'
 

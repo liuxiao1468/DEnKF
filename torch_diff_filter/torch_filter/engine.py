@@ -55,7 +55,7 @@ class Engine():
         duration = 0
 
         # tensorboard writer
-        self.writer = SummaryWriter(f'/tf/experiments/{self.args.train.model_name}/summaries')
+        self.writer = SummaryWriter(f'./experiments/{self.args.train.model_name}/summaries')
 
         ####################################################################################################
         # MAIN TRAINING LOOP
@@ -113,7 +113,7 @@ class Engine():
                 if (self.global_step % self.args.train.save_freq == 0):
                     checkpoint = {'global_step': self.global_step,
                                   'model': self.model.state_dict(),
-                                  'optimizer': self.optimizer.state_dict()}
+                                  'optimizer': optimizer_.state_dict()}
                     torch.save(checkpoint,
                                os.path.join(self.args.train.log_directory,
                                             self.args.train.model_name,

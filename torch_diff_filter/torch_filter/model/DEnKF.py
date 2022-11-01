@@ -212,6 +212,8 @@ class Ensemble_KF(nn.Module):
             ensemble_z.to(dtype=torch.float32), H_X_mean.to(dtype=torch.float32))
         return output
 
+
+############ only for testing ############
 # r_diag = np.ones((2)).astype(np.float32) * 0.1
 # r_diag = r_diag.astype(np.float32)
 

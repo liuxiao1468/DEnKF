@@ -26,8 +26,8 @@ cfg.train.data_path = None
 # Log and save
 cfg.train.log_directory = "./experiments/"  # directory to save checkpoints and summaries
 cfg.train.checkpoint_path = ''  # path to a checkpoint to load
-cfg.train.log_freq = 100  # Logging frequency in global steps
-cfg.train.save_freq = 10000  # Checkpoint saving frequency in global steps
+cfg.train.log_freq = 10000  # Logging frequency in global steps
+cfg.train.save_freq = 10  # Checkpoint saving frequency in global steps
 
 # Training
 cfg.train.dim_x = None
@@ -52,7 +52,7 @@ cfg.train.random_rotate = False  # To perform random rotation for augmentation
 cfg.train.use_right = False  # randomly use right images when train on KITTI
 
 # Online eval
-cfg.train.eval_freq = 1000  # Online evaluation frequency in global steps
+cfg.train.eval_freq = 10  # Online evaluation frequency in global steps
 cfg.train.eval_summary_directory = './experiments/eval/'  # output directory for eval summary
 cfg.train.steps_per_alpha_update = 100
 

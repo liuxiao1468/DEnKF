@@ -11,7 +11,7 @@ from einops import rearrange, repeat
 class transform:
     def __init__(self):
         super(transform, self).__init__()
-        parameters = pickle.load(open('./dataset/full_parameters.pkl', 'rb'))
+        parameters = pickle.load(open('./torch_filter/dataset/full_parameters.pkl', 'rb'))
         self.state_m = parameters['state_m']
         self.state_std = parameters['state_std']
         self.obs_m = parameters['obs_m']
@@ -62,7 +62,7 @@ class KITTIDataset(Dataset):
     # Basic Instantiation
     def __init__(self, num_ensemble, dim_x, dim_z, mode):
         self.dataset_path = '/Users/xiao.lu/project/KITTI_dataset/'
-        self.dataset = pickle.load(open('./dataset/KITTI_VO_dataset.pkl', 'rb'))
+        self.dataset = pickle.load(open('./torch_filter/dataset/KITTI_VO_dataset.pkl', 'rb'))
         self.dataset_length = len(self.dataset)
         self.num_ensemble = num_ensemble
         self.dim_x = dim_x
@@ -117,6 +117,8 @@ class KITTIDataset(Dataset):
 
         return state_gt, state_pre, obs, raw_obs, state_ensemble
 
+
+############ only for testing ############
 # if __name__ == '__main__':
 #     dataset = KITTIDataset(32,5,2, 'train')
 #     dataloader = torch.utils.data.DataLoader(dataset, batch_size=2,

@@ -34,20 +34,18 @@ def parse_args():
 def main():
     cfg, config_file = parse_args()
     cfg.freeze()
-    # ####### check all the parameter settings #######
-    # logger.info("{}".format(cfg))
-    # logger.info("check mode - {}".format(cfg.mode.mode))
+    ####### check all the parameter settings #######
+    logger.info("{}".format(cfg))
+    logger.info("check mode - {}".format(cfg.mode.mode))
     # Create directory for logs and experiment name
-    # if not os.path.exists(cfg.train.log_directory):
-    #     os.mkdir(cfg.train.log_directory)
-    # if not os.path.exists(os.path.join(cfg.train.log_directory, cfg.train.model_name)):
-    #     os.mkdir(os.path.join(cfg.train.log_directory, cfg.train.model_name))
-    #     os.mkdir(os.path.join(cfg.train.log_directory, cfg.train.model_name, 'summaries'))
-    # else:
-    #     logger.warning('This logging directory already exists: {}. Over-writing current files'
-    #                    .format(os.path.join(cfg.train.log_directory, cfg.train.model_name)))
-
-
+    if not os.path.exists(cfg.train.log_directory):
+        os.mkdir(cfg.train.log_directory)
+    if not os.path.exists(os.path.join(cfg.train.log_directory, cfg.train.model_name)):
+        os.mkdir(os.path.join(cfg.train.log_directory, cfg.train.model_name))
+        os.mkdir(os.path.join(cfg.train.log_directory, cfg.train.model_name, 'summaries'))
+    else:
+        logger.warning('This logging directory already exists: {}. Over-writing current files'
+                       .format(os.path.join(cfg.train.log_directory, cfg.train.model_name)))
 
     ####### start the training #######
     train_engine = engine.Engine(args = cfg, logger=logger)
