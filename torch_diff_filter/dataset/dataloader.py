@@ -45,13 +45,31 @@ class transform:
         obs = (obs * self.obs_std) + self.obs_m 
         return obs
 
+class utils:
+    def __init__(self, num_ensemble, dim_x, dim_z):
+        self.num_ensemble = num_ensemble
+        self.dim_x = dim_x
+        self.dim_z = dim_z
+
+    def format_state(self, state):
+        state = repeat(state, 'k dim -> n k dim', n = self.num_ensemble)
+        state = rearrange(state, 'n k dim -> (n k) dim')
+        state = state.to(dtype=torch.float32)
+        return state
+
+
 class KITTIDataset(Dataset):
     # Basic Instantiation
-    def __init__(self):
+    def __init__(self, num_ensemble, dim_x, dim_z, mode):
         self.dataset_path = '/Users/xiao.lu/project/KITTI_dataset/'
         self.dataset = pickle.load(open('./dataset/KITTI_VO_dataset.pkl', 'rb'))
         self.dataset_length = len(self.dataset)
+        self.num_ensemble = num_ensemble
+        self.dim_x = dim_x
+        self.dim_z = dim_z
         self.transform_ = transform()
+        self.utils_ = utils(self.num_ensemble, self.dim_x, self.dim_z)
+
 
     def preprocessing(self, data, mode):
         img_2 = cv2.imread(self.dataset_path+data[3][1])
@@ -70,11 +88,11 @@ class KITTIDataset(Dataset):
         diff = img_2_ - img_1_
         diff = diff*0.5 + 0.5
         img = np.concatenate((img_2_, diff), axis=-1)
-        return img
+        return diff
 
     # Length of the Dataset
     def __len__(self):
-        self.dataset_length = 6
+        self.dataset_length = 128
         return self.dataset_length
 
     # Fetch an item from the Dataset
@@ -91,16 +109,19 @@ class KITTIDataset(Dataset):
         raw_obs = rearrange(raw_obs, 'h w c -> c h w')
 
         # apply the transformation
-        state_gt = self.transform_.state_transform(state_gt)
-        state_pre = self.transform_.state_transform(state_pre)
-        obs = self.transform_.obs_transform(obs)
+        state_gt = self.transform_.state_transform(state_gt).to(dtype=torch.float32)
+        state_pre = self.transform_.state_transform(state_pre).to(dtype=torch.float32)
+        obs = self.transform_.obs_transform(obs).to(dtype=torch.float32)
 
-        return state_gt, state_pre, obs, raw_obs
+        state_ensemble = self.utils_.format_state(state_pre)
+
+        return state_gt, state_pre, obs, raw_obs, state_ensemble
 
 # if __name__ == '__main__':
-#     dataset = KITTIDataset()
+#     dataset = KITTIDataset(32,5,2, 'train')
 #     dataloader = torch.utils.data.DataLoader(dataset, batch_size=2,
 #                                           shuffle=True, num_workers=1)
-#     for state_gt, state_pre, obs, raw_obs in dataloader:
-#         print(obs)
-#         # print(raw_obs.shape)
+#     for state_gt, state_pre, obs, raw_obs, state_ensemble in dataloader:
+#         print(state_ensemble.shape)
+#         print("check -------- ",state_ensemble.dtype)
+        # print(raw_obs.shape)

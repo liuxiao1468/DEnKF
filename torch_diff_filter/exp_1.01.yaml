@@ -1,0 +1,41 @@
+mode:
+    mode: 'train'
+    multiprocessing_distributed: False
+    dist_url: tcp://127.0.0.1:2345
+    num_threads: 1
+    do_online_eval: True
+
+train:
+    dim_x: 5
+    dim_z: 2
+    num_ensemble: 32
+    seed: 0
+    model_name: 'DEnKF'
+    dataset: 'KITTI'
+    input_height: 50
+    input_width: 150
+    data_path: '/Users/xiao.lu/project/KITTI_dataset/'
+    batch_size: 2
+    num_epochs: 50
+    learning_rate: 1e-4
+    weight_decay: 1e-2
+    adam_eps: 1e-3
+    log_freq: 100
+    eval_freq: 500
+    log_directory: './experiments'
+    loss: 'mse'
+
+test:
+    dim_x: 5
+    dim_z: 2
+    num_ensemble: 32
+    model_name: 'DEnKF'
+    data_path: '/Users/xiao.lu/project/KITTI_dataset/'
+    input_height: 50
+    input_width: 150
+    checkpoint_path: './experiments/model.pth'
+    dataset: 'KITTI'
+
+optim:
+    optim: 'adamw'
+    lr_scheduler: 'polynomial_decay'

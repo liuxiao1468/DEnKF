@@ -207,7 +207,9 @@ class Ensemble_KF(nn.Module):
         m_state_new = torch.mean(state_new, axis = 1)
         m_state_new = rearrange(m_state_new, 'bs (k dim) -> bs k dim', k=1)
         m_state_pred = rearrange(m_A, 'bs (k dim) -> bs k dim', k=1)
-        output = (state_new, m_state_new, m_state_pred, z, ensemble_z, H_X_mean)
+        output = (state_new.to(dtype=torch.float32), m_state_new.to(dtype=torch.float32), 
+            m_state_pred.to(dtype=torch.float32), z.to(dtype=torch.float32), 
+            ensemble_z.to(dtype=torch.float32), H_X_mean.to(dtype=torch.float32))
         return output
 
 # r_diag = np.ones((2)).astype(np.float32) * 0.1
@@ -221,8 +223,10 @@ class Ensemble_KF(nn.Module):
 
 # # some dummy input 
 # state = torch.FloatTensor(8, 32, 5)
-# raw_obs = torch.FloatTensor(8, 3, 224, 224)
+# raw_obs = torch.FloatTensor(8, 2, 224, 224)
 # obs = torch.FloatTensor(8, 1, 2)
+
+# print("check -------- ",state.dtype)
 
 # m_state = torch.mean(state, axis = 1)
 
