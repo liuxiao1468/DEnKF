@@ -68,8 +68,7 @@ Run `python train.py --config ./config/xxx.yaml`
 
 
 ## Models
-### differentiable Ensemble Kalman Filters
-In this paper, we present an end-to-end learning approach for recursive filtering that simultaneously learns the observation, dynamics, and noise characteristics of a robotic system. The key contributions of our work can be summarized as follows:
+In this project, we present an end-to-end learning approach for recursive filtering that simultaneously learns the observation, dynamics, and noise characteristics of a robotic system. The key contributions of our work can be summarized as follows:
 - A stochastic state transition model that uses samples from the posterior of a neural network to implicitly model the process noise, avoiding the need for a parametric representation of the posterior.
         
 - An ensemble formulation that allows for the efficient inference of both linear and nonlinear systems, without the need for an explicit covariance matrix, making it suitable for high-dimensional inputs and noisy observations.
@@ -91,13 +90,13 @@ Access to the dataset is available upon request.
 <p align="center">
 <img src = "img/KITTI.png" width ="800"/>
 </p>
-We assess the performance of state estimation using an 11-fold cross-validation withholding 1 trajectory at each time. We report the root mean squared error (RMSE), mean absolute error (MAE), and the standard KITTI benchmark metrics, the translational error (m/m), and the rotational error (deg/m). The error metrics are computed from the test trajectory over all subsequences of 100 timesteps, and all subsequences of 100, 200, 400, and 800 timesteps. Figure shows the performance of DEnKF and other differentiable filtering techniques. Note that lower error metrics can be obtained by imposing domain- and data-specific information, i.e., using stereo images, incorporating LiDAR, or applying SLAM and loop-closure related assumptions. However, we opt for the most commonly used setup when comparing filtering technique in a task-agnostic fashion to ensure fair and comparable evaluations. 
+We assess the performance of state estimation using an 11-fold cross-validation withholding 1 trajectory at each time. We report the root mean squared error (RMSE), mean absolute error (MAE), and the standard KITTI benchmark metrics, the translational error (m/m), and the rotational error (deg/m). The error metrics are computed from the test trajectory over all subsequences of 100 timesteps, and all subsequences of 100, 200, 400, and 800 timesteps. Figure above shows the performance of DEnKF and other differentiable filtering techniques, and the input images to the model.
 
 ### UR5 Task
 <p align="center">
 <img src = "img/UR5.png" width ="800"/>
 </p>
-The experimental results indicate that DEnKF and the other baseline DFs are capable of achieving domain adaptation by fine-tuning the simulation framework for real-world scenarios.  Notably, the DEnKF with sim-to-real transfer achieves accurate state estimation, resulting in a reduction of 29% in MAE for joint angle space and 33% for end-effector (EE) positions when compared to the dPF-M-lrn. The DEnKF with sim-to-real transfer exhibits an average of 2.6cm offset (MAE) from the ground truth for EE positions across testing sequences. We further analyze the state tracking in EE space by visualizing the EE trajectories in 3D, as depicted in Figure, where the fine-tuned DEnKF is utilized to estimate the state with two real-robot test examples of action sequence ``pick up" and ``put down".
+The experimental results of UR5 manipulation task indicate that DEnKF are capable of achieving domain adaptation by fine-tuning the simulation framework for real-world scenarios.  Notably, the DEnKF with sim-to-real transfer achieves accurate state estimation, resulting in a reduction of 29% in MAE for joint angle space and 33% for end-effector (EE) positions when compared to the baselines. The DEnKF with sim-to-real transfer exhibits an average of 2.6cm offset (MAE) from the ground truth for EE positions across testing sequences. We further analyze the state tracking in EE space by visualizing the EE trajectories in 3D, as depicted in Figure, where the fine-tuned DEnKF is utilized to estimate the state with two real-robot test examples of action sequence "pick up" and "put down".
 
 ## Citation
 * Please cite the paper if you used any materials from this repo, Thanks.
