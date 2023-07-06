@@ -1,4 +1,4 @@
-# differentiable Ensemble Kalman Filters
+# Differentiable Ensemble Kalman Filters (DEnKF)
 This paper introduces a novel state estimation framework for robots using differentiable ensemble Kalman filters (DEnKF). DEnKF is a reformulation of the traditional ensemble Kalman filter that employs stochastic neural networks to model the process noise implicitly. Our work is an extension of previous research on differentiable filters, which has provided a strong foundation for our modular and end-to-end differentiable framework. This framework enables each component of the system to function independently, leading to improved flexibility and versatility in implementation. Through a series of experiments, we demonstrate the flexibility of this model across a diverse set of real-world tracking tasks, including visual odometry and robot manipulation. Moreover, we show that our model effectively handles noisy observations, is robust in the absence of observations, and outperforms state-of-the-art differentiable filters in terms of error metrics. Specifically, we observe a significant improvement of at least 59% in translational error when using DEnKF with noisy observations. Our results underscore the potential of DEnKF in advancing state estimation for robotics.
 
 <p align="center">
@@ -10,7 +10,7 @@ We provide two implementations using `Pytorch` and `Tensorflow`. Docker workflow
 
 #### docker workflow
 
-Clone the repo `git clone https://github.com/liuxiao1468/differentiable-filters.git`
+Clone the repo `git clone https://github.com/liuxiao1468/DEnKF.git`
 
 #### Set the environment variables
 Edit the `conf.sh` file to set the environment variables used to start the docker 
