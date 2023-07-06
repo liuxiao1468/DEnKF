@@ -2,7 +2,7 @@
 This paper introduces a novel state estimation framework for robots using differentiable ensemble Kalman filters (DEnKF). DEnKF is a reformulation of the traditional ensemble Kalman filter that employs stochastic neural networks to model the process noise implicitly. Our work is an extension of previous research on differentiable filters, which has provided a strong foundation for our modular and end-to-end differentiable framework. This framework enables each component of the system to function independently, leading to improved flexibility and versatility in implementation. Through a series of experiments, we demonstrate the flexibility of this model across a diverse set of real-world tracking tasks, including visual odometry and robot manipulation. Moreover, we show that our model effectively handles noisy observations, is robust in the absence of observations, and outperforms state-of-the-art differentiable filters in terms of error metrics. Specifically, we observe a significant improvement of at least 59% in translational error when using DEnKF with noisy observations. Our results underscore the potential of DEnKF in advancing state estimation for robotics.
 
 <p align="center">
-<img src = "img/overview.png" width ="600" />
+<img src = "img/overview.png" width ="500" />
 </p>
 
 ## Getting Started
@@ -87,13 +87,13 @@ Access to the dataset is available upon request.
 
 ### Visual Odometry Task
 <p align="center">
-<img src = "img/KITTI.png" width ="600"/>
+<img src = "img/KITTI.png" width ="800"/>
 </p>
 We assess the performance of state estimation using an 11-fold cross-validation withholding 1 trajectory at each time. We report the root mean squared error (RMSE), mean absolute error (MAE), and the standard KITTI benchmark metrics, the translational error (m/m), and the rotational error (deg/m). The error metrics are computed from the test trajectory over all subsequences of 100 timesteps, and all subsequences of 100, 200, 400, and 800 timesteps. Figure shows the performance of DEnKF and other differentiable filtering techniques. Note that lower error metrics can be obtained by imposing domain- and data-specific information, i.e., using stereo images, incorporating LiDAR, or applying SLAM and loop-closure related assumptions. However, we opt for the most commonly used setup when comparing filtering technique in a task-agnostic fashion to ensure fair and comparable evaluations. 
 
 ### UR5 Task
 <p align="center">
-<img src = "img/UR5.png" width ="600"/>
+<img src = "img/UR5.png" width ="800"/>
 </p>
 The experimental results indicate that DEnKF and the other baseline DFs are capable of achieving domain adaptation by fine-tuning the simulation framework for real-world scenarios.  Notably, the DEnKF with sim-to-real transfer achieves accurate state estimation, resulting in a reduction of 29% in MAE for joint angle space and 33% for end-effector (EE) positions when compared to the dPF-M-lrn. The DEnKF with sim-to-real transfer exhibits an average of 2.6cm offset (MAE) from the ground truth for EE positions across testing sequences. We further analyze the state tracking in EE space by visualizing the EE trajectories in 3D, as depicted in Figure, where the fine-tuned DEnKF is utilized to estimate the state with two real-robot test examples of action sequence ``pick up" and ``put down".
 
