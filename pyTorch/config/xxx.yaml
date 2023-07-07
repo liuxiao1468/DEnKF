@@ -4,36 +4,36 @@ mode:
     dist_url: tcp://127.0.0.1:2345
     num_threads: 1
     do_online_eval: True
-    parameter_path: './dataset/processed_data/parameter_4.pkl'
+    parameter_path: ''
 train:
-    dim_x: 3
-    dim_z: 3
-    dim_a: 40
+    dim_x: 5
+    dim_z: 5
+    dim_a: ''
     num_ensemble: 32
     seed: 0
-    model_name: 'tensegrity_4'
-    dataset: 'tensegrity'
-    input_size: 30
-    data_path: './dataset/processed_data/train_dataset_4.pkl'
-    batch_size: 64
-    num_epochs: 50
+    model_name: 'DEnKF'
+    dataset: 'car_dataset'
+    input_size: ''
+    data_path: './dataset/car_dataset_train.pkl'
+    batch_size: 32
+    num_epochs: 30
     learning_rate: 1e-4
     weight_decay: 1e-2
     adam_eps: 1e-3
-    log_freq: 100
-    eval_freq: 10000
+    log_freq: 50
+    eval_freq: 1000
     log_directory: './experiments'
     loss: 'mse'
 test:
-    dim_x: 3
-    dim_z: 3
-    dim_a: 40
+    dim_x: 5
+    dim_z: 5
+    dim_a: ''
     num_ensemble: 32
-    model_name: 'tensegrity_33'
-    data_path: './dataset/processed_data/test_dataset_4.pkl'
-    input_size: 30
-    checkpoint_path: './experiments/tensegrity_4/model-100000'
-    dataset: 'tensegrity'
+    model_name: 'DEnKF'
+    data_path: './dataset/car_dataset_test.pkl'
+    input_size: ''
+    checkpoint_path: ''
+    dataset: 'car_dataset'
 optim:
     optim: 'adamw'
     lr_scheduler: 'polynomial_decay'

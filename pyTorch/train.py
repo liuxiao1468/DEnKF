@@ -9,18 +9,19 @@ import engine
 
 # $python train.py --config tensegrity_1.0.yaml
 logging_kwargs = dict(
-        level="INFO",
-        format="%(asctime)s %(threadName)s %(levelname)s %(name)s - %(message)s",
-        style='%',
-    )
+    level="INFO",
+    format="%(asctime)s %(threadName)s %(levelname)s %(name)s - %(message)s",
+    style="%",
+)
 logging.basicConfig(**logging_kwargs)
-logger = logging.getLogger('DEnKF')
+logger = logging.getLogger("DEnKF")
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', help='configuration file path', required=True)
-    parser.add_argument('--batch-size', type=int, default=None)
-    parser.add_argument('--num_epochs', type=int, default=None)
+    parser.add_argument("--config", help="configuration file path", required=True)
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--num_epochs", type=int, default=None)
     args = parser.parse_args()
     config_file = args.config
     if config_file and os.path.exists(config_file):
@@ -30,6 +31,7 @@ def parse_args():
     if bool(args.num_epochs):
         cfg.train.num_epochs = args.num_epochs
     return cfg, config_file
+
 
 def main():
     cfg, config_file = parse_args()
@@ -42,17 +44,23 @@ def main():
         os.mkdir(cfg.train.log_directory)
     if not os.path.exists(os.path.join(cfg.train.log_directory, cfg.train.model_name)):
         os.mkdir(os.path.join(cfg.train.log_directory, cfg.train.model_name))
-        os.mkdir(os.path.join(cfg.train.log_directory, cfg.train.model_name, 'summaries'))
+        os.mkdir(
+            os.path.join(cfg.train.log_directory, cfg.train.model_name, "summaries")
+        )
     else:
-        logger.warning('This logging directory already exists: {}. Over-writing current files'
-                       .format(os.path.join(cfg.train.log_directory, cfg.train.model_name)))
+        logger.warning(
+            "This logging directory already exists: {}. Over-writing current files".format(
+                os.path.join(cfg.train.log_directory, cfg.train.model_name)
+            )
+        )
 
     ####### start the training #######
-    train_engine = engine.Engine(args = cfg, logger=logger)
-    if cfg.mode.mode == 'train':
+    train_engine = engine.Engine(args=cfg, logger=logger)
+    if cfg.mode.mode == "train":
         train_engine.train()
-    if cfg.mode.mode == 'test':
+    if cfg.mode.mode == "test":
         train_engine.online_test()
+
 
 if __name__ == "__main__":
     main()
