@@ -255,7 +255,7 @@ class Engine:
             if (
                 self.args.mode.do_online_eval
                 and self.global_step != 0
-                and epoch + 1 >= 50
+                and epoch + 1 >= 10
                 and (epoch + 1) % self.args.train.eval_freq == 0
             ):
                 time.sleep(0.1)
@@ -278,7 +278,7 @@ class Engine:
             self.model.load_state_dict(checkpoint["model"])
         self.model.eval()
 
-        test_dataset = tensegrityDataset(self.args, "test")
+        test_dataset = CarDataset(self.args, "test")
         test_dataloader = torch.utils.data.DataLoader(
             test_dataset, batch_size=1, shuffle=False, num_workers=1
         )
@@ -288,24 +288,12 @@ class Engine:
         ensemble_save = []
         gt_save = []
         obs_save = []
-        for (
-            state_gt,
-            state_pre,
-            obs,
-            action,
-            state_ensemble,
-            sample_freq,
-        ) in test_dataloader:
-            state_gt = state_gt.to(self.device)
-            state_pre = state_pre.to(self.device)
-            obs = obs.to(self.device)
-            action = action.to(self.device)
-            state_ensemble = state_ensemble.to(self.device)
-            sample_freq = sample_freq.to(self.device)
-
-            selection = []  # -> try different combination by remove modalites
-            mask = self.generate_mask(selection)
-            mask = mask.to(self.device)
+        for data in test_dataloader:
+            data = [item.to(self.device) for item in data]
+            state_ensemble = data[1]
+            state_pre = data[0]
+            obs = data[3]
+            state_gt = data[2]
 
             with torch.no_grad():
                 if step == 0:
@@ -315,18 +303,12 @@ class Engine:
                     ensemble = ensemble
                     state = state
                 input_state = (ensemble, state)
-                obs_action = (action, obs, sample_freq)
-                output = self.model(obs_action, input_state, mask)
+                obs_action = obs
+                output = self.model(obs_action, input_state)
 
                 ensemble = output[0]  # -> ensemble estimation
                 state = output[1]  # -> final estimation
                 obs_p = output[3]  # -> learned observation
-                if step % 1000 == 0:
-                    print("===============")
-                    print(state)
-                    print(obs_p)
-                    print(state_gt)
-                    print(output[2])
 
                 final_ensemble = ensemble  # -> make sure these variables are tensor
                 final_est = state
@@ -351,7 +333,7 @@ class Engine:
         save_path = os.path.join(
             self.args.train.eval_summary_directory,
             self.args.train.model_name,
-            "test-result-{}.pkl".format("52"),
+            "eval-result-{}.pkl".format(self.global_step),
         )
 
         with open(save_path, "wb") as f:
