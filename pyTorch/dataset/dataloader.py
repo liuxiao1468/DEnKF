@@ -87,7 +87,10 @@ class CarDataset(Dataset):
         gt = rearrange(gt, "(k dim) -> k dim", k=1)
 
         # gt image
-        img_path = "./dataset" + self.dataset[idx + 1][3]
+        img_path = (
+            "./new-nas/xiao/torch_filter/latent_space/dataset"
+            + self.dataset[idx + 1][3]
+        )
         gt_image = self.process_image(img_path)
         gt_image = torch.tensor(gt_image, dtype=torch.float32)
         gt_image = rearrange(gt_image, "h w ch -> ch h w")
