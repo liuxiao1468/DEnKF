@@ -12,6 +12,28 @@ import math
 import pdb
 
 
+class utils:
+    def __init__(self, num_ensemble, dim_x, dim_z):
+        self.num_ensemble = num_ensemble
+        self.dim_x = dim_x
+        self.dim_z = dim_z
+
+    def multivariate_normal_sampler(self, mean, cov, k):
+        sampler = MultivariateNormal(mean, cov)
+        return sampler.sample((k,))
+
+    def format_state(self, state):
+        state = repeat(state, "k dim -> n k dim", n=self.num_ensemble)
+        state = rearrange(state, "n k dim -> (n k) dim")
+        cov = torch.eye(self.dim_x) * 0.05
+        init_dist = self.multivariate_normal_sampler(
+            torch.zeros(self.dim_x), cov, self.num_ensemble
+        )
+        state = state + init_dist
+        state = state.to(dtype=torch.float32)
+        return state
+
+
 class CarDataset(Dataset):
     # Basic Instantiation
     def __init__(self, args, mode):
@@ -27,8 +49,6 @@ class CarDataset(Dataset):
         self.dataset_length = len(self.dataset)
         self.dim_x = self.args.train.dim_x
         self.dim_z = self.args.train.dim_z
-        self.dim_a = self.args.train.dim_a
-        self.win_size = self.args.train.win_size
 
     def process_image(self, img_path):
         img_array = cv2.imread(img_path)
@@ -38,8 +58,7 @@ class CarDataset(Dataset):
 
     # Length of the Dataset
     def __len__(self):
-        # self.dataset_length = 50
-        return self.dataset_length - self.win_size - 2
+        return self.dataset_length - 2
 
     # Fetch an item from the Dataset
     def __getitem__(self, idx):
@@ -47,7 +66,7 @@ class CarDataset(Dataset):
         not_valid = True
         while not_valid:
             try:
-                if self.dataset[idx][0] == self.dataset[idx + self.win_size][0]:
+                if self.dataset[idx][0] == self.dataset[idx + 1][0]:
                     not_valid = False
                 else:
                     idx = random.randint(0, self.dataset_length)
@@ -55,29 +74,17 @@ class CarDataset(Dataset):
                 idx = random.randint(0, self.dataset_length)
 
         # the observation to the model
-        obs_now = self.dataset[idx + self.win_size][2]
-        scaler = 224 / 90
-        x = int(self.dataset[idx + self.win_size][2][0] * scaler - 10)
-        y = int(self.dataset[idx + self.win_size][2][1] * scaler)
-        obs_now[:2] = obs_now[:2] / 85.0
-        obs_now = torch.tensor(obs_now, dtype=torch.float32)
-        obs_now = rearrange(obs_now, "(k dim) -> k dim", k=1)
-
-        # a stack of image to the model
-        images = []
-        for i in range(self.win_size):
-            img_path = "./dataset" + self.dataset[idx + i][3]
-            img_array = self.process_image(img_path)
-            images.append(img_array)
-        images = np.array(images)
-        images = torch.tensor(images, dtype=torch.float32)
-        images = rearrange(images, "k h w ch -> k ch h w")
+        pre = self.dataset[idx][2]
+        gt = self.dataset[idx + 1][2]
+        pre = torch.tensor(pre, dtype=torch.float32)
+        pre = rearrange(pre, "(k dim) -> k dim", k=1)
+        gt = torch.tensor(gt, dtype=torch.float32)
+        gt = rearrange(gt, "(k dim) -> k dim", k=1)
 
         # gt image
-        img_path = "./dataset" + self.dataset[idx + self.win_size][3]
+        img_path = "./dataset" + self.dataset[idx + 1][3]
         gt_image = self.process_image(img_path)
-
         gt_image = torch.tensor(gt_image, dtype=torch.float32)
         gt_image = rearrange(gt_image, "h w ch -> ch h w")
 
-        return obs_now, images, gt_image
+        return pre, gt, gt_image

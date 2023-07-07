@@ -117,122 +117,6 @@ class ProcessModelAction(nn.Module):
         return state
 
 
-class ProcessModelsampling(nn.Module):
-    """
-    process model takes a state or a stack of states (t-n:t-1) and
-    predict the next state t. this process model takes in the state and actions
-    and outputs a predicted state
-
-    input -> [batch_size, num_ensemble, dim_x]
-    action -> [batch_size, num_ensemble, dim_a]
-    output ->  [batch_size, num_ensemble, dim_x]
-    """
-
-    def __init__(self, num_ensemble, dim_x, dim_a):
-        super(ProcessModelsampling, self).__init__()
-        self.num_ensemble = num_ensemble
-        self.dim_x = dim_x
-        self.dim_a = dim_a
-
-        # temporal embedding
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.pe = self.positionalencoding1d(128, 4)
-        self.pe = self.pe.to(self.device)
-        self.freq_list = [50, 30, 10, 5]
-
-        # channel for state variables
-        self.bayes1 = LinearFlipout(in_features=self.dim_x, out_features=64)
-        self.bayes2 = LinearFlipout(in_features=64, out_features=128)
-        self.bayes3 = LinearFlipout(in_features=128, out_features=64)
-
-        # channel for action variables
-        self.bayes_a1 = LinearFlipout(in_features=self.dim_a, out_features=64)
-        self.bayes_a2 = LinearFlipout(in_features=64, out_features=128)
-        self.bayes_a3 = LinearFlipout(in_features=128, out_features=64)
-
-        # channel for adding temporal embedding
-        self.bayes_m1 = torch.nn.Linear(128, 128)
-        self.bayes_m2 = torch.nn.Linear(128, 64)
-
-        # merge them
-        self.bayes4 = LinearFlipout(in_features=64, out_features=32)
-        self.bayes5 = LinearFlipout(in_features=32, out_features=self.dim_x)
-
-    def positionalencoding1d(self, d_model, length):
-        """
-        :param d_model: dimension of the model
-        :param length: length of positions
-        :return: length*d_model position matrix
-        """
-        if d_model % 2 != 0:
-            raise ValueError(
-                "Cannot use sin/cos positional encoding with "
-                "odd dim (got dim={:d})".format(d_model)
-            )
-        pe = torch.zeros(length, d_model)
-        position = torch.arange(0, length).unsqueeze(1)
-        div_term = torch.exp(
-            (
-                torch.arange(0, d_model, 2, dtype=torch.float)
-                * -(math.log(10000.0) / d_model)
-            )
-        )
-        pe[:, 0::2] = torch.sin(position.float() * div_term)
-        pe[:, 1::2] = torch.cos(position.float() * div_term)
-
-        return pe
-
-    def forward(self, last_state, action, sample_freq):
-        batch_size = last_state.shape[0]
-        last_state = rearrange(
-            last_state, "bs k dim -> (bs k) dim", bs=batch_size, k=self.num_ensemble
-        )
-        action = rearrange(
-            action, "bs k dim -> (bs k) dim", bs=batch_size, k=self.num_ensemble
-        )
-        sample_freq = rearrange(
-            sample_freq, "bs k dim -> (bs k) dim", bs=batch_size, k=self.num_ensemble
-        )
-
-        # branch for the state variables
-        x, _ = self.bayes1(last_state)
-        x = F.relu(x)
-        x, _ = self.bayes2(x)
-        x = F.relu(x)
-        x, _ = self.bayes3(x)
-        x = F.relu(x)
-
-        # branch for the action variables
-        y, _ = self.bayes_a1(action)
-        y = F.relu(y)
-        y, _ = self.bayes_a2(y)
-        y = F.relu(y)
-        y, _ = self.bayes_a3(y)
-        y = F.relu(y)
-
-        # merge branch
-        merge = torch.cat((x, y), axis=1)
-
-        # apply temporal embedding
-        for k in range(sample_freq.shape[0]):
-            freq = int(sample_freq[k])
-            ind = self.freq_list.index(freq)
-            merge[k] = self.pe[ind, :] + merge[k]
-
-        merge = self.bayes_m1(merge)
-        merge = self.bayes_m2(merge)
-        feat_map = merge
-
-        merge, _ = self.bayes4(merge)
-        update, _ = self.bayes5(merge)
-        state = last_state + update
-        state = rearrange(
-            state, "(bs k) dim -> bs k dim", bs=batch_size, k=self.num_ensemble
-        )
-
-        return state, feat_map
-
-
 class ObservationModel(nn.Module):
     """
     observation model takes a predicted state at t-1 and
@@ -299,6 +183,72 @@ class MCLayer(nn.Module):
         tmp = self.weights * mask.t()
         w_times_x = torch.mm(x, tmp.t())
         return torch.add(w_times_x, self.bias)  # w times x + b
+
+
+class imgSensorModel(nn.Module):
+    """
+    latent sensor model takes the inputs stacks of images t-n:t-1
+    and generate the latent state representations for the transformer
+    process model, here we use resnet34 as the basic encoder to project
+    down the vision inputs
+
+    images -> [batch, channels, height, width]
+    out -> [batch, ensemble, latent_dim_x]
+    """
+
+    def __init__(self, num_ensemble, dim_x):
+        super(imgSensorModel, self).__init__()
+        self.num_ensemble = num_ensemble
+        self.dim_x = dim_x
+        self.layer1 = torch.nn.Sequential(
+            torch.nn.Conv2d(3, 16, kernel_size=5, stride=2, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(kernel_size=2, stride=2),
+            torch.nn.Dropout(p=0.1),
+        )
+        self.layer2 = torch.nn.Sequential(
+            torch.nn.Conv2d(16, 32, kernel_size=5, stride=2, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(kernel_size=2, stride=2),
+            torch.nn.Dropout(p=0.1),
+        )
+        self.layer3 = torch.nn.Sequential(
+            torch.nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(kernel_size=2, stride=2, padding=1),
+            torch.nn.Dropout(p=0.1),
+        )
+        self.linear1 = torch.nn.Linear(64 * 7 * 7, 512)
+        self.bayes1 = LinearFlipout(in_features=512, out_features=64)
+        self.bayes2 = LinearFlipout(in_features=64, out_features=dim_x)
+
+    def forward(self, images):
+        batch_size = images.shape[0]
+        x = images
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = x.view(x.size(0), -1)
+        x = self.linear1(x)
+        x = F.leaky_relu(x)
+        x = repeat(x, "bs dim -> bs en dim", en=self.num_ensemble)
+        x = rearrange(x, "bs k dim -> (bs k) dim")
+        x, _ = self.bayes1(x)
+        x = F.leaky_relu(x)
+        encoding = x
+        obs, _ = self.bayes2(x)
+        obs = rearrange(
+            obs, "(bs k) dim -> bs k dim", bs=batch_size, k=self.num_ensemble
+        )
+        obs_z = torch.mean(obs, axis=1)
+        obs_z = rearrange(obs_z, "bs (k dim) -> bs k dim", k=1)
+        encoding = rearrange(
+            encoding, "(bs k) dim -> bs k dim", bs=batch_size, k=self.num_ensemble
+        )
+        encoding = torch.mean(encoding, axis=1)
+        encoding = rearrange(encoding, "(bs k) dim -> bs k dim", bs=batch_size, k=1)
+
+        return obs, obs_z, encoding
 
 
 class BayesianSensorModel(nn.Module):
@@ -386,25 +336,6 @@ class ObservationNoise(nn.Module):
         diag = rearrange(diag, "bs k dim -> (bs k) dim")
         R = torch.diag_embed(diag)
         return R
-
-
-class Forward_model(nn.Module):
-    def __init__(self, num_ensemble, dim_x, dim_a):
-        super(Forward_model, self).__init__()
-        self.num_ensemble = num_ensemble
-        self.dim_x = dim_x
-        self.dim_a = dim_a
-        self.process_model = ProcessModelsampling(
-            self.num_ensemble, self.dim_x, self.dim_a
-        )
-
-    def forward(self, states, action, sample_freq):
-        state_old, m_state = states
-        state_pred = self.process_model(state_old, action, sample_freq)
-        m_A = torch.mean(state_pred, axis=1)
-        m_state_pred = rearrange(m_A, "bs (k dim) -> bs k dim", k=1)
-        output = (state_pred, m_state_pred)
-        return output
 
 
 class Forward_model_stable(nn.Module):
@@ -501,104 +432,27 @@ class Ensemble_KF_low(nn.Module):
         return output
 
 
-class Ensemble_KF_general(nn.Module):
-    def __init__(self, num_ensemble, dim_x, dim_z, dim_a):
-        super(Ensemble_KF_general, self).__init__()
+class DEnKF(nn.Module):
+    def __init__(self, num_ensemble, dim_x, dim_z):
+        super(DEnKF, self).__init__()
         self.num_ensemble = num_ensemble
         self.dim_x = dim_x
         self.dim_z = dim_z
-        self.dim_a = dim_a
-        self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.05
-        self.r_diag = self.r_diag.astype(np.float32)
-
-        # instantiate model
-        self.process_model = ProcessModelsampling(
-            self.num_ensemble, self.dim_x, self.dim_a
-        )
-        self.observation_model = ObservationModel(
-            self.num_ensemble, self.dim_x, self.dim_z
-        )
-        self.observation_noise = ObservationNoise(self.dim_z, self.r_diag)
-        self.sensor_model = BayesianSensorModel(self.num_ensemble, self.dim_z)
-
-    def forward(self, inputs, states, mask):
-        # decompose inputs and states
-        batch_size = inputs[0].shape[0]
-        action, raw_obs, sample_freq = inputs
-        state_old, m_state = states
-
-        ##### prediction step #####
-        state_pred, feat_map = self.process_model(state_old, action, sample_freq)
-        m_A = torch.mean(state_pred, axis=1)
-        mean_A = repeat(m_A, "bs dim -> bs k dim", k=self.num_ensemble)
-        A = state_pred - mean_A
-        A = rearrange(A, "bs k dim -> bs dim k")
-
-        ##### update step #####
-        H_X = self.observation_model(state_pred)
-        mean = torch.mean(H_X, axis=1)
-        H_X_mean = rearrange(mean, "bs (k dim) -> bs k dim", k=1)
-        m = repeat(mean, "bs dim -> bs k dim", k=self.num_ensemble)
-        H_A = H_X - m
-        # transpose operation
-        H_XT = rearrange(H_X, "bs k dim -> bs dim k")
-        H_AT = rearrange(H_A, "bs k dim -> bs dim k")
-
-        # get learned observation
-        ensemble_z, z, encoding = self.sensor_model(raw_obs, mask)
-        y = rearrange(ensemble_z, "bs k dim -> bs dim k")
-        R = self.observation_noise(encoding)
-
-        # measurement update
-        innovation = (1 / (self.num_ensemble - 1)) * torch.matmul(H_AT, H_A) + R
-        inv_innovation = torch.linalg.inv(innovation)
-        K = (1 / (self.num_ensemble - 1)) * torch.matmul(
-            torch.matmul(A, H_A), inv_innovation
-        )
-        gain = rearrange(torch.matmul(K, y - H_XT), "bs dim k -> bs k dim")
-        state_new = state_pred + gain
-
-        # gather output
-        m_state_new = torch.mean(state_new, axis=1)
-        m_state_new = rearrange(m_state_new, "bs (k dim) -> bs k dim", k=1)
-        m_state_pred = rearrange(m_A, "bs (k dim) -> bs k dim", k=1)
-        # encoding = rearrange(m_A, "bs k dim -> (bs k) dim", k=1)
-        output = (
-            state_new.to(dtype=torch.float32),
-            m_state_new.to(dtype=torch.float32),
-            m_state_pred.to(dtype=torch.float32),
-            z.to(dtype=torch.float32),
-            ensemble_z.to(dtype=torch.float32),
-            H_X_mean.to(dtype=torch.float32),
-            feat_map.to(dtype=torch.float32),
-            # encoding.to(dtype=torch.float32),
-        )
-        return output
-
-
-class Ensemble_KF_no_action(nn.Module):
-    def __init__(self, num_ensemble, dim_x, dim_z, dim_a):
-        super(Ensemble_KF_no_action, self).__init__()
-        self.num_ensemble = num_ensemble
-        self.dim_x = dim_x
-        self.dim_z = dim_z
-        self.dim_a = dim_a
         self.r_diag = np.ones((self.dim_z)).astype(np.float32) * 0.1
         self.r_diag = self.r_diag.astype(np.float32)
 
         # instantiate model
         self.process_model = ProcessModel(self.num_ensemble, self.dim_x)
-        # self.process_model = ProcessModelAction(self.num_ensemble, self.dim_x, self.dim_a)
         self.observation_model = ObservationModel(
             self.num_ensemble, self.dim_x, self.dim_z
         )
         self.observation_noise = ObservationNoise(self.dim_z, self.r_diag)
-        self.sensor_model = BayesianSensorModel(self.num_ensemble, self.dim_z)
+        self.sensor_model = imgSensorModel(self.num_ensemble, self.dim_z)
 
-    def forward(self, inputs, states, mask):
+    def forward(self, inputs, states):
         # decompose inputs and states
         batch_size = inputs[0].shape[0]
-        action, raw_obs = inputs
+        raw_obs = inputs
         state_old, m_state = states
 
         ##### prediction step #####
@@ -619,7 +473,7 @@ class Ensemble_KF_no_action(nn.Module):
         H_AT = rearrange(H_A, "bs k dim -> bs dim k")
 
         # get learned observation
-        ensemble_z, z, encoding = self.sensor_model(raw_obs, mask)
+        ensemble_z, z, encoding = self.sensor_model(raw_obs)
         y = rearrange(ensemble_z, "bs k dim -> bs dim k")
         R = self.observation_noise(encoding)
 
@@ -645,27 +499,3 @@ class Ensemble_KF_no_action(nn.Module):
             H_X_mean.to(dtype=torch.float32),
         )
         return output
-
-
-############ only for testing ############
-# r_diag = np.ones((2)).astype(np.float32) * 0.1
-# r_diag = r_diag.astype(np.float32)
-
-# model = Ensemble_KF(32, 5, 2)
-# # print('The model:')
-# # print(model)
-# # pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-# # print('Total number of parameters: ',pytorch_total_params)
-
-# # some dummy input
-# state = torch.FloatTensor(8, 32, 5)
-# raw_obs = torch.FloatTensor(8, 2, 224, 224)
-# obs = torch.FloatTensor(8, 1, 2)
-
-# print("check -------- ",state.dtype)
-
-# m_state = torch.mean(state, axis = 1)
-
-# input_state = (state, m_state)
-
-# model(raw_obs, input_state)
