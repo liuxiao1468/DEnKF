@@ -6,8 +6,8 @@ mode:
     do_online_eval: True
     parameter_path: ''
 train:
-    dim_x: 5
-    dim_z: 5
+    dim_x: 4
+    dim_z: 4
     dim_a: ''
     num_ensemble: 32
     seed: 0
@@ -25,8 +25,8 @@ train:
     log_directory: './experiments'
     loss: 'mse'
 test:
-    dim_x: 5
-    dim_z: 5
+    dim_x: 4
+    dim_z: 4
     dim_a: ''
     num_ensemble: 32
     model_name: 'DEnKF'
