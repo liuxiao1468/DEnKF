@@ -49,6 +49,9 @@ class CarDataset(Dataset):
         self.dataset_length = len(self.dataset)
         self.dim_x = self.args.train.dim_x
         self.dim_z = self.args.train.dim_z
+        self.utils_ = utils(
+            self.num_ensemble, self.args.train.dim_x, self.args.train.dim_z
+        )
 
     def process_image(self, img_path):
         img_array = cv2.imread(img_path)
@@ -78,6 +81,8 @@ class CarDataset(Dataset):
         gt = self.dataset[idx + 1][2]
         pre = torch.tensor(pre, dtype=torch.float32)
         pre = rearrange(pre, "(k dim) -> k dim", k=1)
+        ensemble_pre = self.utils_.format_state(pre)
+
         gt = torch.tensor(gt, dtype=torch.float32)
         gt = rearrange(gt, "(k dim) -> k dim", k=1)
 
@@ -87,4 +92,6 @@ class CarDataset(Dataset):
         gt_image = torch.tensor(gt_image, dtype=torch.float32)
         gt_image = rearrange(gt_image, "h w ch -> ch h w")
 
-        return pre, gt, gt_image
+        data = (pre, ensemble_pre, gt, gt_image)
+
+        return data

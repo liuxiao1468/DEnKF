@@ -6,8 +6,7 @@ import torch
 import torch.nn as nn
 from dataset import tensegrityDataset
 from model import Ensemble_KF_low
-from model import Ensemble_KF_no_action
-from model import Ensemble_KF_general
+from model import DEnKF
 from optimizer import build_optimizer
 from optimizer import build_lr_scheduler
 from torch.utils.tensorboard import SummaryWriter
@@ -28,12 +27,7 @@ class Engine:
         self.global_step = 0
         self.mode = self.args.mode.mode
         self.dataset = tensegrityDataset(self.args, self.mode)
-        # self.model = Ensemble_KF_low(
-        #     self.num_ensemble, self.dim_x, self.dim_z, self.dim_a
-        # )
-        self.model = Ensemble_KF_general(
-            self.num_ensemble, self.dim_x, self.dim_z, self.dim_a
-        )
+        self.model = DEnKF(self.num_ensemble, self.dim_x, self.dim_z)
         # Check model type
         if not isinstance(self.model, nn.Module):
             raise TypeError("model must be an instance of nn.Module")
@@ -41,47 +35,7 @@ class Engine:
         if torch.cuda.is_available():
             self.model.cuda()
 
-    def generate_mask(self, selection):
-        """
-        selection means the index of the row sensor to remove
-        i.e. selection = [1] -> remove the 1st imu readings
-             selection = [3,4] -> remove the 3td, and 4th imy readings
-        """
-        if len(selection) == 0:
-            index = []
-        else:
-            index = []
-            for i in range(len(selection)):
-                if selection[i] == 1:
-                    for j in range(6):
-                        idx_1 = 0 + j
-                        index.append(idx_1)
-                if selection[i] == 2:
-                    for j in range(6):
-                        idx_1 = 6 + j
-                        index.append(idx_1)
-                if selection[i] == 3:
-                    for j in range(6):
-                        idx_1 = 12 + j
-                        index.append(idx_1)
-                if selection[i] == 4:
-                    for j in range(6):
-                        idx_1 = 18 + j
-                        index.append(idx_1)
-                if selection[i] == 5:
-                    for j in range(6):
-                        idx_1 = 24 + j
-                        index.append(idx_1)
-        tmp = np.ones((30, 128))
-        if len(index) != 0:
-            tmp[index, :] = tmp[index, :] * 0
-        mask = torch.tensor(tmp, dtype=torch.float32)
-        return mask
-
     def test(self):
-        # Load the pretrained model
-        # checkpoint = torch.load(self.args.test.checkpoint_path)
-        # self.model.load_state_dict(checkpoint['model'])
         test_dataset = tensegrityDataset(self.args, "test")
         test_dataloader = torch.utils.data.DataLoader(
             test_dataset, batch_size=1, shuffle=False, num_workers=1
@@ -92,24 +46,13 @@ class Engine:
         ensemble_save = []
         gt_save = []
         obs_save = []
-        for (
-            state_gt,
-            state_pre,
-            obs,
-            action,
-            state_ensemble,
-            sample_freq,
-        ) in test_dataloader:
-            state_gt = state_gt.to(self.device)
-            state_pre = state_pre.to(self.device)
-            obs = obs.to(self.device)
-            action = action.to(self.device)
-            state_ensemble = state_ensemble.to(self.device)
-            sample_freq = sample_freq.to(self.device)
+        for data in test_dataloader:
+            data = [item.to(self.device) for item in data]
+            state_ensemble = data[1]
+            state_pre = data[0]
+            obs = data[3]
+            state_gt = data[2]
 
-            selection = []  # -> means we don't remove modalities during training
-            mask = self.generate_mask(selection)
-            mask = mask.to(self.device)
             with torch.no_grad():
                 if step == 0:
                     ensemble = state_ensemble
@@ -118,8 +61,8 @@ class Engine:
                     ensemble = ensemble
                     state = state
                 input_state = (ensemble, state)
-                obs_action = (action, obs, sample_freq)
-                output = self.model(obs_action, input_state, mask)
+                obs_action = obs
+                output = self.model(obs_action, input_state)
 
                 ensemble = output[0]  # -> ensemble estimation
                 state = output[1]  # -> final estimation
@@ -155,15 +98,15 @@ class Engine:
             pickle.dump(data, f)
 
     def train(self):
-        # Load the pretrained model
-        if torch.cuda.is_available():
-            checkpoint = torch.load(self.args.test.checkpoint_path)
-            self.model.load_state_dict(checkpoint["model"])
-        else:
-            checkpoint = torch.load(
-                self.args.test.checkpoint_path, map_location=torch.device("cpu")
-            )
-            self.model.load_state_dict(checkpoint["model"])
+        # # Load the pretrained model
+        # if torch.cuda.is_available():
+        #     checkpoint = torch.load(self.args.test.checkpoint_path)
+        #     self.model.load_state_dict(checkpoint["model"])
+        # else:
+        #     checkpoint = torch.load(
+        #         self.args.test.checkpoint_path, map_location=torch.device("cpu")
+        #     )
+        #     self.model.load_state_dict(checkpoint["model"])
 
         mse_criterion = nn.MSELoss()
         dataloader = torch.utils.data.DataLoader(
@@ -176,11 +119,7 @@ class Engine:
 
         # Create optimizer
         optimizer_ = build_optimizer(
-            [
-                self.model.process_model,
-                self.model.observation_model,
-                self.model.observation_noise,
-            ],
+            [self.model],
             self.args.network.name,
             self.args.optim.optim,
             self.args.train.learning_rate,
@@ -215,34 +154,21 @@ class Engine:
 
         while epoch < self.args.train.num_epochs:
             step = 0
-            for (
-                state_gt,
-                state_pre,
-                obs,
-                action,
-                state_ensemble,
-                sample_freq,
-            ) in dataloader:
-                state_gt = state_gt.to(self.device)
-                state_pre = state_pre.to(self.device)
-                obs = obs.to(self.device)
-                action = action.to(self.device)
-                state_ensemble = state_ensemble.to(self.device)
-                sample_freq.to(self.device)
+            for data in dataloader:
+                data = [item.to(self.device) for item in data]
+                state_ensemble = data[1]
+                state_pre = data[0]
+                obs = data[3]
+                state_gt = data[2]
 
-                modalities = [1, 2, 3, 4, 5]
-                # selection = random.sample(modalities, 1)
-                selection = []  # -> means we don't remove modalities during training
-                mask = self.generate_mask(selection)
-                mask = mask.to(self.device)
                 # define the training curriculum
                 optimizer_.zero_grad()
                 before_op_time = time.time()
 
                 # forward pass
                 input_state = (state_ensemble, state_pre)
-                obs_action = (action, obs, sample_freq)
-                output = self.model(obs_action, input_state, mask)
+                obs_action = obs
+                output = self.model(obs_action, input_state)
 
                 final_est = output[1]  # -> final estimation
                 inter_est = output[2]  # -> state transition output
@@ -255,12 +181,12 @@ class Engine:
                 loss_3 = mse_criterion(obs_est, state_gt)
                 loss_4 = mse_criterion(hx, state_gt)
 
-                # if epoch <= 50:
-                #     final_loss = loss_3
-                # else:
-                #     final_loss = loss_1 + loss_2 + loss_3 + loss_4
+                if epoch <= 10:
+                    final_loss = loss_3
+                else:
+                    final_loss = loss_1 + loss_2 + loss_3 + loss_4
 
-                final_loss = loss_1 + loss_2 + loss_3 + loss_4
+                # final_loss = loss_1 + loss_2 + loss_3 + loss_4
 
                 # back prop
                 final_loss.backward()
@@ -321,7 +247,7 @@ class Engine:
                     os.path.join(
                         self.args.train.log_directory,
                         self.args.train.model_name,
-                        "final-model-{}".format(self.global_step),
+                        "model-{}".format(self.global_step),
                     ),
                 )
 
