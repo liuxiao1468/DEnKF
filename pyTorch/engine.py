@@ -4,7 +4,7 @@ import os
 import numpy as np
 import torch
 import torch.nn as nn
-from dataset import tensegrityDataset
+from dataset import CarDataset
 from model import Ensemble_KF_low
 from model import DEnKF
 from optimizer import build_optimizer
@@ -26,7 +26,7 @@ class Engine:
         self.num_ensemble = self.args.train.num_ensemble
         self.global_step = 0
         self.mode = self.args.mode.mode
-        self.dataset = tensegrityDataset(self.args, self.mode)
+        self.dataset = CarDataset(self.args, self.mode)
         self.model = DEnKF(self.num_ensemble, self.dim_x, self.dim_z)
         # Check model type
         if not isinstance(self.model, nn.Module):
@@ -36,7 +36,7 @@ class Engine:
             self.model.cuda()
 
     def test(self):
-        test_dataset = tensegrityDataset(self.args, "test")
+        test_dataset = CarDataset(self.args, "test")
         test_dataloader = torch.utils.data.DataLoader(
             test_dataset, batch_size=1, shuffle=False, num_workers=1
         )
