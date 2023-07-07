@@ -88,7 +88,8 @@ class CarDataset(Dataset):
 
         # gt image
         img_path = (
-            "new-nas/xiao/torch_filter/latent_space/dataset" + self.dataset[idx + 1][3]
+            "/home/xiao.lu/new-nas/xiao/torch_filter/latent_space/dataset"
+            + self.dataset[idx + 1][3]
         )
         gt_image = self.process_image(img_path)
         gt_image = torch.tensor(gt_image, dtype=torch.float32)
