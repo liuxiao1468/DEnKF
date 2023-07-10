@@ -41,7 +41,7 @@ class Engine:
             test_dataset, batch_size=1, shuffle=False, num_workers=1
         )
         step = 0
-        data = {}
+        data_out = {}
         data_save = []
         ensemble_save = []
         gt_save = []
@@ -83,10 +83,10 @@ class Engine:
                 obs_save.append(obs_est)
                 step = step + 1
 
-        data["state"] = data_save
-        data["ensemble"] = ensemble_save
-        data["gt"] = gt_save
-        data["observation"] = obs_save
+        data_out["state"] = data_save
+        data_out["ensemble"] = ensemble_save
+        data_out["gt"] = gt_save
+        data_out["observation"] = obs_save
 
         save_path = os.path.join(
             self.args.train.eval_summary_directory,
@@ -95,7 +95,7 @@ class Engine:
         )
 
         with open(save_path, "wb") as f:
-            pickle.dump(data, f)
+            pickle.dump(data_out, f)
 
     def train(self):
         # # Load the pretrained model
@@ -285,7 +285,7 @@ class Engine:
             test_dataset, batch_size=1, shuffle=False, num_workers=1
         )
         step = 0
-        data = {}
+        data_out = {}
         data_save = []
         ensemble_save = []
         gt_save = []
@@ -327,10 +327,10 @@ class Engine:
                 obs_save.append(obs_est)
                 step = step + 1
 
-        data["state"] = data_save
-        data["ensemble"] = ensemble_save
-        data["gt"] = gt_save
-        data["observation"] = obs_save
+        data_out["state"] = data_save
+        data_out["ensemble"] = ensemble_save
+        data_out["gt"] = gt_save
+        data_out["observation"] = obs_save
 
         save_path = os.path.join(
             self.args.train.eval_summary_directory,
@@ -339,4 +339,4 @@ class Engine:
         )
 
         with open(save_path, "wb") as f:
-            pickle.dump(data, f)
+            pickle.dump(data_out, f)
