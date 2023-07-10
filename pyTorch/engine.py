@@ -206,8 +206,6 @@ class Engine:
                             final_loss,
                         )
                     )
-                    print(obs_est[0])
-                    print(state_gt[0])
                     if np.isnan(final_loss.cpu().item()):
                         self.logger.warning("NaN in loss occurred. Aborting training.")
                         return -1
