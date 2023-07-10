@@ -7,6 +7,11 @@ This repository is the official implementation of the paper "Enhancing State Est
 <img src = "img/overview.png" width ="500" />
 </p>
 
+## Tutorials and Documentation
+A set of tutorials and documentation about DEnKF has been provided in the following Jupyter Notebooks:
+1. [Data Preparation with Example] (https://github.com/liuxiao1468/DEnKF/tree/master/pyTorch)
+
+
 ## Getting Started
 We provide two implementations using `Pytorch` and `Tensorflow`. Docker workflow remains the same for both implementations.
 
