@@ -10,11 +10,9 @@ This repository is the official implementation of the paper "Enhancing State Est
 ## Getting Started
 We provide two implementations using `Pytorch` and `Tensorflow`. Docker workflow remains the same for both implementations.
 
-#### docker workflow
+#### 1. docker workflow
 
-Clone the repo `git clone https://github.com/liuxiao1468/DEnKF.git`
-
-#### Set the environment variables
+Clone the repo `git clone https://github.com/liuxiao1468/DEnKF.git` and then set the environment variables.
 Edit the `conf.sh` file to set the environment variables used to start the docker 
 containers. 
 
@@ -24,13 +22,10 @@ CONTAINER_NAME=UR5  # name of the docker container.
 DATASET_PATH=/home/xiao/datasets/  # Dataset path on the host machine.
 CUDA_VISIBLE_DEVICES=0  # comma-separated list of GPU's to set visible.
 ```
+Build the docker image by running `./build.sh`.
 
-#### Build the docker image
-Run `./build.sh`
 
-## Project Structure 
-
-#### Training or testing - PyTorch
+#### 2. Training or testing - PyTorch
 Create or a modify a yaml file found in `./pyTorch/config/xxx.yaml` 
 with the appropriate parameters. Set the mode parameter to perform the 
 training or testing routine. 
@@ -42,23 +37,19 @@ mode:
 
 Run the training and test script using the bash file `./run_filter.sh $CONFIG_FILE` 
 where `$CONFIG_FILE` is the path to the config file. e.g. 
-`./run_filter.sh ./config/xxx.yaml`
+`./run_filter.sh ./config/xxx.yaml`. View the logs with `docker logs -f $CONTAINER_NAME`
 
-View the logs with `docker logs -f $CONTAINER_NAME`
-
-#### Training or testing - Tensorflow
+#### 3. Training or testing - Tensorflow
 After setting appropriate parameters for `UR5/run_filter.py` or `KITTI/run_filter.py`.
-Run the training or testing script using the bash file `./run_filter.sh`.
+Run the training or testing script using the bash file `./run_filter.sh`. View the logs with `docker logs -f $CONTAINER_NAME`
 
-View the logs with `docker logs -f $CONTAINER_NAME`
-
-#### Tensorboard
+#### 4. Tensorboard
 
 Use the docker logs to copy the tensorboard link to a browser
 
 ```docker logs -f $CONTAINER_NAME-tensorboard```
  
-#### Without Docker
+#### 5. Without Docker
 
 - `PyTorch`: If you don't want to use the docker container for training, you may directly use the `train.py` script and pass in the config file. Make sure to have corresponding libraries and dependencies installed on your local machine. Plase refer to `requirement.txt` and `Dockerfile` for those required packages.
 Go to `./UR5` and then
