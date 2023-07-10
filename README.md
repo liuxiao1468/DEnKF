@@ -9,7 +9,7 @@ This repository is the official implementation of the paper "Enhancing State Est
 
 ## Tutorials and Documentation
 A set of tutorials and documentation about DEnKF has been provided in the following Jupyter Notebooks:
-1. [Data Preparation with Example](https://github.com/liuxiao1468/DEnKF/tree/master/pyTorch)
+1. [Data Preparation with Example](https://github.com/liuxiao1468/DEnKF/blob/master/pyTorch/1.%20Data%20Preparation%20with%20Example.ipynb)
 2. [Quick Start with DEnKF](https://github.com/liuxiao1468/DEnKF/blob/master/pyTorch/2.%20Quick%20Start%20with%20DEnKF.ipynb)
 3. [Train the model](https://github.com/liuxiao1468/DEnKF/blob/master/pyTorch/3.%20Train%20the%20model.ipynb)
 4. [Evaluation](https://github.com/liuxiao1468/DEnKF/blob/master/pyTorch/4.%20Evaluation.ipynb)
