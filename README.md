@@ -84,7 +84,7 @@ https://huggingface.co/datasets/liuxiao1468/simulation_car_dataset
 2. KITTI Visual Odometry Dataset
 https://www.cvlibs.net/datasets/kitti/eval_odometry.php
 3. sim2real UR5 Dataset
-Access to the dataset is available upon request.
+is available upon request. (Yifan: yzhou298@asu.edu)
 
 
 ## Results
